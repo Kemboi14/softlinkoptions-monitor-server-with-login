@@ -1,0 +1,805 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Server Monitor{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center">
+            <div>
+                <h1><i class="bi bi-speedometer2"></i> Server Dashboard</h1>
+                <p class="text-muted mb-0">Real-time monitoring of all registered servers</p>
+            </div>
+            <div class="d-flex gap-3">
+                <div class="search-box">
+                    <input type="text" class="form-control" id="searchInput" placeholder="Search servers..." value="{{ search | default(value='') }}">
+                </div>
+                <div class="btn-group" role="group">
+                    <button class="btn btn-outline-secondary btn-sm" onclick="changePageSize(25)">25</button>
+                    <button class="btn btn-outline-secondary btn-sm active" onclick="changePageSize(50)">50</button>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="changePageSize(100)">100</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if servers %}
+    <div class="server-grid">
+    {% for server_with_stats in servers %}
+        {% set server = server_with_stats.server %}
+        {% set stats = server_with_stats.latest_stats %}
+        
+        <div class="server-panel {% if stats %}{% else %}offline{% endif %}">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <div>
+                    <span class="status-indicator {% if stats %}status-online{% else %}status-offline{% endif %}"></span>
+                    <h5 class="mb-0 d-inline">{{ server.name }}</h5>
+                    <small class="text-white ms-3">{{ server.ip_address }}</small>
+                </div>
+                <div>
+                    {% if stats %}
+                        <small class="text-white">Last seen: {{ stats.created_at }}</small>
+                    {% endif %}
+                    <button class="btn btn-sm btn-outline-light ms-3" onclick="removeServer('{{ server.id }}', '{{ server.name }}')">
+                        <i class="bi bi-trash"></i> Remove
+                    </button>
+                </div>
+            </div>
+            
+            {% if stats %}
+                <div class="card-body">
+                    <div class="row">
+                        <!-- CPU Usage -->
+                        <div class="col-md-6 col-sm-6 mb-3">
+                            <div class="metric-card card h-100">
+                                <div class="card-body text-center">
+                                    <div class="metric-value text-primary">{{ stats.cpu_usage | round(precision=1) }}%</div>
+                                    <div class="metric-label">CPU Usage</div>
+                                    <div class="progress mt-2">
+                                        <div class="progress-bar {% if stats.cpu_usage > 80.0 %}bg-danger{% elif stats.cpu_usage > 60.0 %}bg-warning{% else %}bg-success{% endif %}" 
+                                             style="width: {{ stats.cpu_usage }}%; background: {% if stats.cpu_usage > 80.0 %}linear-gradient(135deg, #FF4444, #CC0000){% elif stats.cpu_usage > 60.0 %}linear-gradient(135deg, var(--neon-green), var(--neon-green-dark)){% else %}linear-gradient(135deg, var(--neon-green), var(--neon-green-light)){% endif %};"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Memory Usage -->
+                        <div class="col-md-6 col-sm-6 mb-3">
+                            <div class="metric-card card h-100">
+                                <div class="card-body text-center">
+                                    <div class="metric-value text-info">{{ stats.memory_usage | round(precision=1) }}%</div>
+                                    <div class="metric-label">Memory Usage</div>
+                                    <div class="text-muted small">{{ stats.memory_total | round(precision=1) }} GB total</div>
+                                    <div class="progress mt-2">
+                                        <div class="progress-bar {% if stats.memory_usage > 80.0 %}bg-danger{% elif stats.memory_usage > 60.0 %}bg-warning{% else %}bg-info{% endif %}" 
+                                             style="width: {{ stats.memory_usage }}%; background: {% if stats.memory_usage > 80.0 %}linear-gradient(135deg, #FF4444, #CC0000){% elif stats.memory_usage > 60.0 %}linear-gradient(135deg, var(--neon-green), var(--neon-green-dark)){% else %}linear-gradient(135deg, var(--neon-green-light), var(--neon-green)){% endif %};"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <!-- Load Average -->
+                        <div class="col-md-4 col-sm-6 mb-3">
+                            <div class="metric-card card h-100">
+                                <div class="card-body text-center">
+                                    <div class="metric-value text-secondary">{{ stats.load_avg | round(precision=2) }}</div>
+                                    <div class="metric-label">Load Average</div>
+                                    <div class="text-muted small">
+                                        {% if stats.load_avg > 2.0 %}High{% elif stats.load_avg > 1.0 %}Medium{% else %}Normal{% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Logged Users -->
+                        <div class="col-md-4 col-sm-6 mb-3">
+                            <div class="metric-card card h-100">
+                                <div class="card-body text-center">
+                                    <div class="metric-value"><i class="bi bi-people"></i> {{ stats.logged_users }}</div>
+                                    <div class="metric-label">Logged Users</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Uptime -->
+                        <div class="col-md-4 col-sm-6 mb-3">
+                            <div class="metric-card card h-100">
+                                <div class="card-body text-center">
+                                    <div class="metric-value" id="uptime-value-{{ server.id }}">
+                                        <i class="bi bi-clock-fill" id="uptime-icon-{{ server.id }}"></i> 
+                                        <span id="uptime-text-{{ server.id }}"></span>
+                                    </div>
+                                    <div class="metric-label">System Uptime</div>
+                                    <div class="text-muted small" id="uptime-status-{{ server.id }}">
+                                        <i class="bi bi-activity"></i> <span id="uptime-status-text-{{ server.id }}">Loading...</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <!-- Network In -->
+                        <div class="col-md-6 mb-3">
+                            <div class="metric-card card h-100">
+                                <div class="card-body text-center">
+                                    <div class="metric-value text-success"><i class="bi bi-download"></i> {{ stats.network_in | round(precision=1) }}</div>
+                                    <div class="metric-label">Network In (KB/s)</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Network Out -->
+                        <div class="col-md-6 mb-3">
+                            <div class="metric-card card h-100">
+                                <div class="card-body text-center">
+                                    <div class="metric-value text-warning"><i class="bi bi-upload"></i> {{ stats.network_out | round(precision=1) }}</div>
+                                    <div class="metric-label">Network Out (KB/s)</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row mt-3">
+                        <div class="col-12">
+                            <div class="card h-100">
+                                <div class="card-body">
+                                    <div class="metric-label">Quick Actions</div>
+                                    <div class="btn-group w-100 mt-2" role="group">
+                                        <button class="btn btn-outline-primary btn-sm" onclick="showChart('{{ server.id }}', 'cpu')">
+                                            <i class="bi bi-cpu"></i> CPU Chart
+                                        </button>
+                                        <button class="btn btn-outline-info btn-sm" onclick="showChart('{{ server.id }}', 'memory')">
+                                            <i class="bi bi-memory"></i> Memory Chart
+                                        </button>
+                                        <button class="btn btn-outline-success btn-sm" onclick="showChart('{{ server.id }}', 'network')">
+                                            <i class="bi bi-network"></i> Network Chart
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            {% else %}
+                <div class="card-body text-center py-5">
+                    <div class="text-muted">
+                        <i class="bi bi-wifi-off" style="font-size: 3rem;"></i>
+                        <h5 class="mt-3">Server Offline</h5>
+                        <p>No recent metrics available. The server may be offline or Netdata is not accessible.</p>
+                    </div>
+                </div>
+            {% endif %}
+        </div>
+    {% endfor %}
+    </div>
+    
+    <!-- Pagination -->
+    {% if total_pages > 1 %}
+    <nav aria-label="Server list pagination">
+        <ul class="pagination justify-content-center">
+            {% if current_page > 1 %}
+                <li class="page-item">
+                    <a class="page-link" href="?page={{ current_page - 1 }}&limit={{ limit }}{% if search %}&search={{ search }}{% endif %}">
+                        <i class="bi bi-chevron-left"></i> Previous
+                    </a>
+                </li>
+            {% endif %}
+            
+            <!-- Smart page number display -->
+            {% set start_page = (current_page - 2) | max(value=1) %}
+            {% set end_page = (current_page + 2) | min(value=total_pages) %}
+            
+            {% if start_page > 1 %}
+                <li class="page-item">
+                    <a class="page-link" href="?page=1&limit={{ limit }}{% if search %}&search={{ search }}{% endif %}">1</a>
+                </li>
+                {% if start_page > 2 %}
+                    <li class="page-item disabled">
+                        <span class="page-link">...</span>
+                    </li>
+                {% endif %}
+            {% endif %}
+            
+            {% for page_num in range(start=start_page, end=end_page + 1) %}
+                {% if page_num == current_page %}
+                    <li class="page-item active">
+                        <span class="page-link">{{ page_num }}</span>
+                    </li>
+                {% else %}
+                    <li class="page-item">
+                        <a class="page-link" href="?page={{ page_num }}&limit={{ limit }}{% if search %}&search={{ search }}{% endif %}">{{ page_num }}</a>
+                    </li>
+                {% endif %}
+            {% endfor %}
+            
+            {% if end_page < total_pages %}
+                {% if end_page < total_pages - 1 %}
+                    <li class="page-item disabled">
+                        <span class="page-link">...</span>
+                    </li>
+                {% endif %}
+                <li class="page-item">
+                    <a class="page-link" href="?page={{ total_pages }}&limit={{ limit }}{% if search %}&search={{ search }}{% endif %}">{{ total_pages }}</a>
+                </li>
+            {% endif %}
+            
+            {% if current_page < total_pages %}
+                <li class="page-item">
+                    <a class="page-link" href="?page={{ current_page + 1 }}&limit={{ limit }}{% if search %}&search={{ search }}{% endif %}">
+                        Next <i class="bi bi-chevron-right"></i>
+                    </a>
+                </li>
+            {% endif %}
+        </ul>
+    </nav>
+    
+    <div class="text-center mt-3">
+        <small class="text-muted">
+            Showing {{ servers | length }} of {{ total_servers }} servers 
+            {% if search %}matching "{{ search }}"{% endif %}
+            - Page {{ current_page }} of {{ total_pages }}
+        </small>
+    </div>
+    {% endif %}
+{% else %}
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-body text-center py-5">
+                    <div class="text-muted">
+                        <i class="bi bi-server" style="font-size: 4rem;"></i>
+                        <h3 class="mt-4">No Servers Configured</h3>
+                        <p class="lead">Start monitoring your servers by adding your first server.</p>
+                        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addServerModal">
+                            <i class="bi bi-plus-circle"></i> Add Your First Server
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endif %}
+
+<!-- Historical Chart Modal -->
+<div class="modal fade" id="historicalChartModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="chartModalTitle">Historical Data</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="btn-group mb-3" role="group" id="chartPeriodButtons">
+                    <button type="button" class="btn btn-outline-primary active" onclick="loadHistoricalData('1h', this)">1 Hour</button>
+                    <button type="button" class="btn btn-outline-primary" onclick="loadHistoricalData('24h', this)">24 Hours</button>
+                    <button type="button" class="btn btn-outline-primary" onclick="loadHistoricalData('7d', this)">7 Days</button>
+                </div>
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="chart-container">
+                            <canvas id="cpuChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="chart-container">
+                            <canvas id="memoryChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+                <div class="row mt-3">
+                    <div class="col-md-6">
+                        <div class="chart-container">
+                            <canvas id="diskChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="chart-container">
+                            <canvas id="networkChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let currentServerId = null;
+let charts = {};
+
+// Check if Chart is available
+if (typeof Chart === 'undefined') {
+    console.error('Chart.js is not loaded');
+}
+
+function showChart(serverId, metricType) {
+    if (typeof Chart === 'undefined') {
+        alert('Chart.js library is not loaded. Please refresh the page.');
+        return;
+    }
+    
+    currentServerId = serverId;
+    const modal = new bootstrap.Modal(document.getElementById('historicalChartModal'));
+    modal.show();
+    
+    // Load initial data
+    loadHistoricalData('1h', document.querySelector('#chartPeriodButtons button'));
+}
+
+async function loadHistoricalData(period, button) {
+    if (!currentServerId) return;
+    
+    if (typeof Chart === 'undefined') {
+        console.error('Chart.js is not available');
+        alert('Chart.js library is not loaded. Please refresh the page.');
+        return;
+    }
+    
+    // Update active button
+    document.querySelectorAll('#chartPeriodButtons button').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    button.classList.add('active');
+    
+    // Show loading indicator
+    const loadingIndicator = document.createElement('div');
+    loadingIndicator.className = 'text-center p-4';
+    loadingIndicator.innerHTML = '<div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div>';
+    
+    // Clear existing charts
+    ['cpuChart', 'memoryChart', 'diskChart', 'networkChart'].forEach(chartId => {
+        const container = document.getElementById(chartId);
+        if (container) {
+            container.innerHTML = '';
+        }
+    });
+    
+    try {
+        const response = await fetch(`/history/${currentServerId}?period=${period}&limit=100`);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        if (!Array.isArray(data) || data.length === 0) {
+            throw new Error('No historical data available');
+        }
+        
+        // Update modal title
+        const serverName = document.querySelector(`[onclick*="${currentServerId}"]`).closest('.card').querySelector('h5').textContent.trim();
+        document.getElementById('chartModalTitle').textContent = `${serverName} - Historical Data (${period})`;
+        
+        // Prepare chart data
+        const labels = data.map(item => new Date(item.created_at).toLocaleTimeString());
+        
+        // Destroy existing charts
+        Object.values(charts).forEach(chart => {
+            try {
+                chart.destroy();
+            } catch (e) {
+                console.warn('Error destroying chart:', e);
+            }
+        });
+        charts = {};
+        
+        // CPU Chart
+        const cpuCtx = document.getElementById('cpuChart');
+        if (cpuCtx) {
+            charts.cpu = new Chart(cpuCtx.getContext('2d'), {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'CPU Usage (%)',
+                        data: data.map(item => item.cpu_usage),
+                        borderColor: 'rgb(255, 99, 132)',
+                        backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                        borderWidth: 3,
+                        tension: 0.4,
+                        fill: true,
+                        pointRadius: 4,
+                        pointHoverRadius: 6,
+                        pointBackgroundColor: 'rgb(255, 99, 132)',
+                        pointBorderColor: '#fff',
+                        pointBorderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'CPU Usage Over Time',
+                            font: {
+                                size: 16,
+                                weight: 'bold'
+                            }
+                        },
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            labels: {
+                                usePointStyle: true,
+                                padding: 20
+                            }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                            titleColor: '#fff',
+                            bodyColor: '#fff',
+                            borderColor: 'rgb(255, 99, 132)',
+                            borderWidth: 1,
+                            padding: 12,
+                            displayColors: true,
+                            callbacks: {
+                                label: function(context) {
+                                    return `CPU: ${context.parsed.y.toFixed(1)}%`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            display: true,
+                            title: {
+                                display: true,
+                                text: 'Time'
+                            },
+                            grid: {
+                                display: false
+                            }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            max: 100,
+                            title: {
+                                display: true,
+                                text: 'CPU Usage (%)'
+                            },
+                            grid: {
+                                color: 'rgba(0, 0, 0, 0.1)'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Memory Chart
+        const memoryCtx = document.getElementById('memoryChart');
+        if (memoryCtx) {
+            charts.memory = new Chart(memoryCtx.getContext('2d'), {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Memory Usage (%)',
+                        data: data.map(item => item.memory_usage),
+                        borderColor: 'rgb(54, 162, 235)',
+                        backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                        borderWidth: 3,
+                        tension: 0.4,
+                        fill: true,
+                        pointRadius: 4,
+                        pointHoverRadius: 6,
+                        pointBackgroundColor: 'rgb(54, 162, 235)',
+                        pointBorderColor: '#fff',
+                        pointBorderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Memory Usage Over Time',
+                            font: {
+                                size: 16,
+                                weight: 'bold'
+                            }
+                        },
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            labels: {
+                                usePointStyle: true,
+                                padding: 20
+                            }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                            titleColor: '#fff',
+                            bodyColor: '#fff',
+                            borderColor: 'rgb(54, 162, 235)',
+                            borderWidth: 1,
+                            padding: 12,
+                            displayColors: true,
+                            callbacks: {
+                                label: function(context) {
+                                    return `Memory: ${context.parsed.y.toFixed(1)}%`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            display: true,
+                            title: {
+                                display: true,
+                                text: 'Time'
+                            },
+                            grid: {
+                                display: false
+                            }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            max: 100,
+                            title: {
+                                display: true,
+                                text: 'Memory Usage (%)'
+                            },
+                            grid: {
+                                color: 'rgba(0, 0, 0, 0.1)'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Disk Chart
+        const diskCtx = document.getElementById('diskChart');
+        if (diskCtx) {
+            charts.disk = new Chart(diskCtx.getContext('2d'), {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Disk Usage (%)',
+                        data: data.map(item => item.disk_usage),
+                        borderColor: 'rgb(255, 205, 86)',
+                        backgroundColor: 'rgba(255, 205, 86, 0.1)',
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Disk Usage'
+                        },
+                        legend: {
+                            display: true
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: 100
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Network Chart
+        const networkCtx = document.getElementById('networkChart');
+        if (networkCtx) {
+            charts.network = new Chart(networkCtx.getContext('2d'), {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Network In (KB/s)',
+                        data: data.map(item => item.network_in),
+                        borderColor: 'rgb(75, 192, 192)',
+                        backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                        borderWidth: 3,
+                        tension: 0.4,
+                        fill: false,
+                        pointRadius: 4,
+                        pointHoverRadius: 6,
+                        pointBackgroundColor: 'rgb(75, 192, 192)',
+                        pointBorderColor: '#fff',
+                        pointBorderWidth: 2
+                    }, {
+                        label: 'Network Out (KB/s)',
+                        data: data.map(item => item.network_out),
+                        borderColor: 'rgb(255, 159, 64)',
+                        backgroundColor: 'rgba(255, 159, 64, 0.1)',
+                        borderWidth: 3,
+                        tension: 0.4,
+                        fill: false,
+                        pointRadius: 4,
+                        pointHoverRadius: 6,
+                        pointBackgroundColor: 'rgb(255, 159, 64)',
+                        pointBorderColor: '#fff',
+                        pointBorderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Network I/O Over Time',
+                            font: {
+                                size: 16,
+                                weight: 'bold'
+                            }
+                        },
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            labels: {
+                                usePointStyle: true,
+                                padding: 20
+                            }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                            titleColor: '#fff',
+                            bodyColor: '#fff',
+                            padding: 12,
+                            displayColors: true,
+                            callbacks: {
+                                label: function(context) {
+                                    const label = context.dataset.label;
+                                    const value = context.parsed.y;
+                                    return `${label}: ${value.toFixed(2)} KB/s`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            display: true,
+                            title: {
+                                display: true,
+                                text: 'Time'
+                            },
+                            grid: {
+                                display: false
+                            }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Network Traffic (KB/s)'
+                            },
+                            grid: {
+                                color: 'rgba(0, 0, 0, 0.1)'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+    } catch (error) {
+        console.error('Error loading historical data:', error);
+        alert('Error loading historical data: ' + error.message);
+    }
+}
+
+// Search functionality
+document.addEventListener('DOMContentLoaded', function() {
+    // Enhanced uptime formatting for all servers
+    {% for server_with_stats in servers %}
+        {% set stats = server_with_stats.latest_stats %}
+        {% if stats %}
+            const uptimeSeconds = {{ stats.uptime }};
+            const uptimeTextElement = document.getElementById('uptime-text-{{ server_with_stats.server.id }}');
+            const uptimeValueElement = document.getElementById('uptime-value-{{ server_with_stats.server.id }}');
+            const uptimeIconElement = document.getElementById('uptime-icon-{{ server_with_stats.server.id }}');
+            const uptimeStatusElement = document.getElementById('uptime-status-{{ server_with_stats.server.id }}');
+            const uptimeStatusTextElement = document.getElementById('uptime-status-text-{{ server_with_stats.server.id }}');
+            
+            if (uptimeTextElement && uptimeValueElement && uptimeIconElement && uptimeStatusElement && uptimeStatusTextElement) {
+                // Format uptime text
+                const formattedUptime = formatUptime(uptimeSeconds);
+                uptimeTextElement.textContent = formattedUptime;
+                
+                // Apply color based on uptime status
+                const uptimeColor = getUptimeColor(uptimeSeconds);
+                uptimeValueElement.style.color = uptimeColor;
+                uptimeIconElement.style.color = uptimeColor;
+                
+                // Set status text and icon
+                const status = getUptimeStatus(uptimeSeconds);
+                let statusText = '';
+                let statusIcon = 'bi-activity';
+                
+                switch(status) {
+                    case 'critical':
+                        statusText = 'Critical - Rebooted recently';
+                        statusIcon = 'bi-exclamation-triangle-fill';
+                        break;
+                    case 'warning':
+                        statusText = 'Warning - Less than 24h';
+                        statusIcon = 'bi-exclamation-circle-fill';
+                        break;
+                    case 'good':
+                        statusText = 'Good - Stable uptime';
+                        statusIcon = 'bi-check-circle-fill';
+                        break;
+                    case 'excellent':
+                        statusText = 'Excellent - Long running';
+                        statusIcon = 'bi-award-fill';
+                        break;
+                    default:
+                        statusText = 'Unknown - No data';
+                        statusIcon = 'bi-question-circle-fill';
+                }
+                
+                uptimeStatusTextElement.textContent = statusText;
+                uptimeStatusElement.style.color = uptimeColor;
+                
+                // Update status icon
+                const iconElement = uptimeStatusElement.querySelector('i');
+                if (iconElement) {
+                    iconElement.className = `bi ${statusIcon}`;
+                }
+                
+                // Add pulsing animation for critical/warning status
+                if (status === 'critical' || status === 'warning') {
+                    uptimeValueElement.style.animation = 'pulse 2s infinite';
+                    uptimeIconElement.style.animation = 'pulse 2s infinite';
+                }
+            }
+        {% endif %}
+    {% endfor %}
+    
+    // Search input handler
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) {
+        searchInput.addEventListener('keyup', function(e) {
+            if (e.key === 'Enter') {
+                const searchValue = e.target.value;
+                const url = new URL(window.location);
+                if (searchValue) {
+                    url.searchParams.set('search', searchValue);
+                } else {
+                    url.searchParams.delete('search');
+                }
+                url.searchParams.delete('page'); // Reset to page 1
+                window.location.href = url.toString();
+            }
+        });
+    }
+});
+
+// Change page size
+function changePageSize(size) {
+    const url = new URL(window.location);
+    url.searchParams.set('limit', size);
+    url.searchParams.delete('page'); // Reset to page 1
+    window.location.href = url.toString();
+}
+</script>
+{% endblock %}

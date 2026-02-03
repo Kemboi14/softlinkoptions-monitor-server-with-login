@@ -1,0 +1,419 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Server Monitor{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h1><i class="bi bi-speedometer2"></i> Server Dashboard</h1>
+        <p class="text-muted">Real-time monitoring of all registered servers</p>
+    </div>
+</div>
+
+{% if servers %}
+    {% for server_with_stats in servers %}
+        {% set server = server_with_stats.server %}
+        {% set stats = server_with_stats.latest_stats %}
+        
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card server-panel {% if stats %}{% else %}offline{% endif %}">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <div>
+                            <span class="status-indicator {% if stats %}status-online{% else %}status-offline{% endif %}"></span>
+                            <h5 class="mb-0 d-inline">{{ server.name }}</h5>
+                            <small class="text-muted ms-3">{{ server.ip_address }}</small>
+                        </div>
+                        <div>
+                            {% if stats %}
+                                <small class="text-muted">Last seen: {{ stats.created_at }}</small>
+                            {% endif %}
+                            <button class="btn btn-sm btn-outline-danger ms-3" onclick="removeServer('{{ server.id }}', '{{ server.name }}')">
+                                <i class="bi bi-trash"></i> Remove
+                            </button>
+                        </div>
+                    </div>
+                    
+                    {% if stats %}
+                        <div class="card-body">
+                            <div class="row">
+                                <!-- CPU Usage -->
+                                <div class="col-md-3 col-sm-6 mb-3">
+                                    <div class="metric-card card h-100">
+                                        <div class="card-body text-center">
+                                            <div class="metric-value text-primary">{{ "%.1f"|format(value=stats.cpu_usage) }}%</div>
+                                            <div class="metric-label">CPU Usage</div>
+                                            <div class="progress mt-2">
+                                                <div class="progress-bar {% if stats.cpu_usage > 80.0 %}bg-danger{% elif stats.cpu_usage > 60.0 %}bg-warning{% else %}bg-success{% endif %}" 
+                                                     style="width: {{ stats.cpu_usage }}%"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Memory Usage -->
+                                <div class="col-md-3 col-sm-6 mb-3">
+                                    <div class="metric-card card h-100">
+                                        <div class="card-body text-center">
+                                            <div class="metric-value text-info">{{ "%.1f"|format(value=stats.memory_usage) }}%</div>
+                                            <div class="metric-label">Memory Usage</div>
+                                            <div class="text-muted small">{{ "%.1f"|format(value=stats.memory_total) }} GB total</div>
+                                            <div class="progress mt-2">
+                                                <div class="progress-bar {% if stats.memory_usage > 80.0 %}bg-danger{% elif stats.memory_usage > 60.0 %}bg-warning{% else %}bg-info{% endif %}" 
+                                                     style="width: {{ stats.memory_usage }}%"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Disk Usage -->
+                                <div class="col-md-3 col-sm-6 mb-3">
+                                    <div class="metric-card card h-100">
+                                        <div class="card-body text-center">
+                                            <div class="metric-value text-warning">{{ "%.1f"|format(value=stats.disk_usage) }}%</div>
+                                            <div class="metric-label">Disk Usage</div>
+                                            <div class="progress mt-2">
+                                                <div class="progress-bar {% if stats.disk_usage > 90.0 %}bg-danger{% elif stats.disk_usage > 75.0 %}bg-warning{% else %}bg-success{% endif %}" 
+                                                     style="width: {{ stats.disk_usage }}%"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Load Average -->
+                                <div class="col-md-3 col-sm-6 mb-3">
+                                    <div class="metric-card card h-100">
+                                        <div class="card-body text-center">
+                                            <div class="metric-value text-secondary">{{ "%.2f"|format(value=stats.load_avg) }}</div>
+                                            <div class="metric-label">Load Average</div>
+                                            <div class="text-muted small">
+                                                {% if stats.load_avg > 2.0 %}High{% elif stats.load_avg > 1.0 %}Medium{% else %}Normal{% endif %}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="row mt-3">
+                                <!-- Logged Users -->
+                                <div class="col-md-2 col-sm-4 mb-3">
+                                    <div class="metric-card card h-100">
+                                        <div class="card-body text-center">
+                                            <div class="metric-value"><i class="bi bi-people"></i> {{ stats.logged_users }}</div>
+                                            <div class="metric-label">Logged Users</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Network In -->
+                                <div class="col-md-2 col-sm-4 mb-3">
+                                    <div class="metric-card card h-100">
+                                        <div class="card-body text-center">
+                                            <div class="metric-value text-success"><i class="bi bi-download"></i> {{ "%.1f"|format(value=stats.network_in) }}</div>
+                                            <div class="metric-label">Network In (KB/s)</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Network Out -->
+                                <div class="col-md-2 col-sm-4 mb-3">
+                                    <div class="metric-card card h-100">
+                                        <div class="card-body text-center">
+                                            <div class="metric-value text-warning"><i class="bi bi-upload"></i> {{ "%.1f"|format(value=stats.network_out) }}</div>
+                                            <div class="metric-label">Network Out (KB/s)</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Uptime -->
+                                <div class="col-md-3 col-sm-6 mb-3">
+                                    <div class="metric-card card h-100">
+                                        <div class="card-body text-center">
+                                            <div class="metric-value text-info"><i class="bi bi-clock"></i> <span id="uptime-{{ server.id }}"></span></div>
+                                            <div class="metric-label">Uptime</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Charts -->
+                                <div class="col-md-3 col-sm-6 mb-3">
+                                    <div class="card h-100">
+                                        <div class="card-body">
+                                            <div class="metric-label">Quick Actions</div>
+                                            <div class="btn-group-vertical w-100 mt-2" role="group">
+                                                <button class="btn btn-outline-primary btn-sm" onclick="showChart('{{ server.id }}', 'cpu')">
+                                                    <i class="bi bi-cpu"></i> CPU Chart
+                                                </button>
+                                                <button class="btn btn-outline-info btn-sm" onclick="showChart('{{ server.id }}', 'memory')">
+                                                    <i class="bi bi-memory"></i> Memory Chart
+                                                </button>
+                                                <button class="btn btn-outline-success btn-sm" onclick="showChart('{{ server.id }}', 'network')">
+                                                    <i class="bi bi-network"></i> Network Chart
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    {% else %}
+                        <div class="card-body text-center py-5">
+                            <div class="text-muted">
+                                <i class="bi bi-wifi-off" style="font-size: 3rem;"></i>
+                                <h5 class="mt-3">Server Offline</h5>
+                                <p>No recent metrics available. The server may be offline or Netdata is not accessible.</p>
+                            </div>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        
+        <script>
+            // Format uptime for this server
+            document.addEventListener('DOMContentLoaded', function() {
+                {% if stats %}
+                    document.getElementById('uptime-{{ server.id }}').textContent = formatUptime({{ stats.uptime }});
+                {% endif %}
+            });
+        </script>
+    {% endfor %}
+{% else %}
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-body text-center py-5">
+                    <div class="text-muted">
+                        <i class="bi bi-server" style="font-size: 4rem;"></i>
+                        <h3 class="mt-4">No Servers Configured</h3>
+                        <p class="lead">Start monitoring your servers by adding your first server.</p>
+                        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addServerModal">
+                            <i class="bi bi-plus-circle"></i> Add Your First Server
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endif %}
+
+<!-- Historical Chart Modal -->
+<div class="modal fade" id="historicalChartModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="chartModalTitle">Historical Data</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="btn-group mb-3" role="group" id="chartPeriodButtons">
+                    <button type="button" class="btn btn-outline-primary active" onclick="loadHistoricalData('1h', this)">1 Hour</button>
+                    <button type="button" class="btn btn-outline-primary" onclick="loadHistoricalData('24h', this)">24 Hours</button>
+                    <button type="button" class="btn btn-outline-primary" onclick="loadHistoricalData('7d', this)">7 Days</button>
+                </div>
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="chart-container">
+                            <canvas id="cpuChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="chart-container">
+                            <canvas id="memoryChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+                <div class="row mt-3">
+                    <div class="col-md-6">
+                        <div class="chart-container">
+                            <canvas id="diskChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="chart-container">
+                            <canvas id="networkChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let currentServerId = null;
+let charts = {};
+
+function showChart(serverId, metricType) {
+    currentServerId = serverId;
+    const modal = new bootstrap.Modal(document.getElementById('historicalChartModal'));
+    modal.show();
+    
+    // Load initial data
+    loadHistoricalData('1h', document.querySelector('#chartPeriodButtons button'));
+}
+
+async function loadHistoricalData(period, button) {
+    if (!currentServerId) return;
+    
+    // Update active button
+    document.querySelectorAll('#chartPeriodButtons button').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    button.classList.add('active');
+    
+    try {
+        const response = await fetch(`/history/${currentServerId}?period=${period}`);
+        const data = await response.json();
+        
+        // Update modal title
+        const serverName = document.querySelector(`[onclick*="${currentServerId}"]`).closest('.card').querySelector('h5').textContent.trim();
+        document.getElementById('chartModalTitle').textContent = `${serverName} - Historical Data (${period})`;
+        
+        // Prepare chart data
+        const labels = data.map(item => new Date(item.created_at).toLocaleTimeString());
+        
+        // Destroy existing charts
+        Object.values(charts).forEach(chart => chart.destroy());
+        charts = {};
+        
+        // CPU Chart
+        const cpuCtx = document.getElementById('cpuChart').getContext('2d');
+        charts.cpu = new Chart(cpuCtx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'CPU Usage (%)',
+                    data: data.map(item => item.cpu_usage),
+                    borderColor: 'rgb(255, 99, 132)',
+                    backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                    tension: 0.1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'CPU Usage'
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 100
+                    }
+                }
+            }
+        });
+        
+        // Memory Chart
+        const memoryCtx = document.getElementById('memoryChart').getContext('2d');
+        charts.memory = new Chart(memoryCtx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Memory Usage (%)',
+                    data: data.map(item => item.memory_usage),
+                    borderColor: 'rgb(54, 162, 235)',
+                    backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                    tension: 0.1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Memory Usage'
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 100
+                    }
+                }
+            }
+        });
+        
+        // Disk Chart
+        const diskCtx = document.getElementById('diskChart').getContext('2d');
+        charts.disk = new Chart(diskCtx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Disk Usage (%)',
+                    data: data.map(item => item.disk_usage),
+                    borderColor: 'rgb(255, 205, 86)',
+                    backgroundColor: 'rgba(255, 205, 86, 0.1)',
+                    tension: 0.1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Disk Usage'
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 100
+                    }
+                }
+            }
+        });
+        
+        // Network Chart
+        const networkCtx = document.getElementById('networkChart').getContext('2d');
+        charts.network = new Chart(networkCtx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Network In (KB/s)',
+                    data: data.map(item => item.network_in),
+                    borderColor: 'rgb(75, 192, 192)',
+                    backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                    tension: 0.1
+                }, {
+                    label: 'Network Out (KB/s)',
+                    data: data.map(item => item.network_out),
+                    borderColor: 'rgb(255, 159, 64)',
+                    backgroundColor: 'rgba(255, 159, 64, 0.1)',
+                    tension: 0.1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Network I/O'
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+        
+    } catch (error) {
+        console.error('Error loading historical data:', error);
+        alert('Error loading historical data');
+    }
+}
+</script>
+{% endblock %}
