@@ -22,6 +22,12 @@ pub struct ServerStats {
     pub logged_users: i64,
     pub network_in: f64,
     pub network_out: f64,
+    // per-second rates (bytes/sec)
+    pub network_in_rate: f64,
+    pub network_out_rate: f64,
+    // disk IO rates (bytes/sec)
+    pub disk_read_rate: f64,
+    pub disk_write_rate: f64,
     pub uptime: i64,
     pub created_at: NaiveDateTime,
 }

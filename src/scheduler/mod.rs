@@ -57,7 +57,7 @@ async fn collect_all_metrics(metrics_service: &MetricsService, pool: &SqlitePool
                             server_clone.name, server_clone.ip_address
                         );
 
-                        match service.collect_and_save(&server_clone.ip_address, &server_clone.id).await {
+                        match service.collect_and_save(Some(&server_clone.ip_address), &server_clone.id).await {
                             Ok(_) => {
                                 info!("Successfully collected and saved metrics for {}", server_clone.ip_address);
                                 Ok(())

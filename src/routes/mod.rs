@@ -2,7 +2,7 @@ use actix_web::{get, post, delete, web, HttpResponse, Responder};
 use actix_web::web::Query;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
-use crate::models::{Server, ServerStats, ServerWithStats, NewServer, AverageStats};
+use crate::models::{Server, ServerStats, ServerWithStats, AverageStats};
 use chrono::{Utc, Duration};
 use tera::{Tera, Context};
 use uuid::Uuid;
@@ -26,6 +26,7 @@ struct DashboardQuery {
 #[derive(Serialize)]
 struct FlashMessage {
     message: String,
+    #[serde(rename = "type")]
     type_: String,
 }
 
@@ -34,18 +35,69 @@ pub async fn dashboard(
     pool: web::Data<SqlitePool>,
     tera: web::Data<Tera>,
     query: Query<DashboardQuery>,
+    req: actix_web::HttpRequest,
 ) -> impl Responder {
     let page = query.page.unwrap_or(1);
     let limit = query.limit.unwrap_or(50).min(100); // Max 100 per page
     let offset = (page - 1) * limit;
     
+    // Check for flash message in cookies
+    let flash_message = req.headers().get("cookie")
+        .and_then(|cookie| cookie.to_str().ok())
+        .and_then(|cookie_str| {
+            cookie_str.split(';')
+                .find(|c| c.trim().starts_with("flash_message="))
+                .and_then(|c| {
+                    c.trim().strip_prefix("flash_message=")
+                        .map(|msg| {
+                            let parts: Vec<&str> = msg.splitn(2, ';').collect();
+                            FlashMessage {
+                                message: parts.get(0).unwrap_or(&msg).to_string(),
+                                type_: if parts.get(0).unwrap_or(&msg).contains("success") { "success".to_string() }
+                                       else if parts.get(0).unwrap_or(&msg).contains("fail") { "danger".to_string() }
+                                       else { "info".to_string() },
+                            }
+                        })
+                })
+        });
+    
     match get_servers_with_latest_stats_paginated(&pool, limit, offset, &query.search).await {
         Ok((servers, total_count)) => {
             let total_pages = ((total_count as u32 + limit - 1) / limit) as u32;
             
+            // Calculate real averages from current servers
+            let mut total_cpu = 0.0;
+            let mut total_memory = 0.0;
+            let mut total_disk = 0.0;
+            let mut total_load = 0.0;
+            let mut total_net_in = 0.0;
+            let mut total_net_out = 0.0;
+            let mut server_count = 0;
+            
+            for server_with_stats in &servers {
+                if let Some(stats) = &server_with_stats.latest_stats {
+                    total_cpu += stats.cpu_usage;
+                    total_memory += stats.memory_usage;
+                    total_disk += stats.disk_usage;
+                    total_load += stats.load_avg;
+                    total_net_in += stats.network_in;
+                    total_net_out += stats.network_out;
+                    server_count += 1;
+                }
+            }
+            
+            let avg_cpu = if server_count > 0 { total_cpu / server_count as f64 } else { 0.0 };
+            let avg_memory = if server_count > 0 { total_memory / server_count as f64 } else { 0.0 };
+            let avg_disk = if server_count > 0 { total_disk / server_count as f64 } else { 0.0 };
+            let avg_load = if server_count > 0 { total_load / server_count as f64 } else { 0.0 };
+            let avg_net_in = if server_count > 0 { total_net_in / server_count as f64 } else { 0.0 };
+            let avg_net_out = if server_count > 0 { total_net_out / server_count as f64 } else { 0.0 };
+            
             // Debug logging
             info!("Pagination debug - total_count: {}, limit: {}, total_pages: {}, current_page: {}", 
                   total_count, limit, total_pages, page);
+            info!("Calculated averages - CPU: {:.1}%, Memory: {:.1}%, Disk: {:.1}%, Servers: {}", 
+                  avg_cpu, avg_memory, avg_disk, server_count);
             
             let mut context = Context::new();
             context.insert("servers", &servers);
@@ -55,7 +107,20 @@ pub async fn dashboard(
             context.insert("limit", &limit);
             context.insert("search", &query.search);
             
-            match tera.render("dashboard.html", &context) {
+            // Insert calculated averages
+            context.insert("avg_cpu", &avg_cpu);
+            context.insert("avg_memory", &avg_memory);
+            context.insert("avg_disk", &avg_disk);
+            context.insert("avg_load", &avg_load);
+            context.insert("avg_net_in", &avg_net_in);
+            context.insert("avg_net_out", &avg_net_out);
+            context.insert("online_servers", &server_count);
+            
+            if let Some(flash) = flash_message {
+                context.insert("flash_message", &flash);
+            }
+            
+            let mut response = match tera.render("dashboard.html", &context) {
                 Ok(rendered) => HttpResponse::Ok().content_type("text/html").body(rendered),
                 Err(e) => {
                     let error_details = format!("Template error: {}\n\nSource: {:?}\n\nContext: {:#?}", 
@@ -63,7 +128,16 @@ pub async fn dashboard(
                     eprintln!("{}", error_details);
                     HttpResponse::InternalServerError().body(error_details)
                 }
-            }
+            };
+            
+            // Clear the flash message cookie
+            use actix_web::http::header::{HeaderValue, HeaderName};
+            response.headers_mut().insert(
+                HeaderName::from_static("set-cookie"),
+                HeaderValue::from_str("flash_message=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT").unwrap()
+            );
+            
+            response
         }
         Err(e) => {
             eprintln!("Database error: {}", e);
@@ -85,10 +159,16 @@ pub async fn servers_list(pool: web::Data<SqlitePool>) -> impl Responder {
     }
 }
 
+#[derive(Deserialize)]
+struct NewServerForm {
+    name: String,
+    ip_address: String,
+}
+
 #[post("/servers")]
 pub async fn add_server(
     pool: web::Data<SqlitePool>,
-    new_server: web::Json<NewServer>,
+    form: web::Form<NewServerForm>,
 ) -> impl Responder {
     let server_id = Uuid::new_v4().to_string();
     
@@ -100,30 +180,32 @@ pub async fn add_server(
         VALUES (?, ?, ?, ?)
         "#,
         server_id,
-        new_server.name,
-        new_server.ip_address,
+        form.name,
+        form.ip_address,
         now
     )
     .execute(pool.as_ref())
     .await
     {
         Ok(_) => {
-            HttpResponse::Ok().json(serde_json::json!({
-                "message": "Server added successfully",
-                "server_id": server_id
-            }))
+            HttpResponse::Found()
+                .append_header(("Location", "/"))
+                .append_header(("Set-Cookie", format!("flash_message=Server added successfully; Path=/; Max-Age=5")))
+                .finish()
         }
         Err(e) => {
             eprintln!("Database error: {}", e);
             let e: sqlx::Error = e;
             if e.to_string().contains("UNIQUE constraint failed") {
-                HttpResponse::BadRequest().json(serde_json::json!({
-                    "error": "Server with this IP address already exists"
-                }))
+                HttpResponse::Found()
+                    .append_header(("Location", "/"))
+                    .append_header(("Set-Cookie", format!("flash_message=Server with this IP address already exists; Path=/; Max-Age=5")))
+                    .finish()
             } else {
-                HttpResponse::InternalServerError().json(serde_json::json!({
-                    "error": "Failed to add server"
-                }))
+                HttpResponse::Found()
+                    .append_header(("Location", "/"))
+                    .append_header(("Set-Cookie", format!("flash_message=Failed to add server; Path=/; Max-Age=5")))
+                    .finish()
             }
         }
     }
@@ -142,26 +224,155 @@ pub async fn remove_server(
     {
         Ok(result) => {
             if result.rows_affected() > 0 {
-                HttpResponse::Ok().json(serde_json::json!({
-                    "message": "Server removed successfully"
-                }))
+                HttpResponse::Found()
+                    .append_header(("Location", "/"))
+                    .append_header(("Set-Cookie", format!("flash_message=Server removed successfully; Path=/; Max-Age=5")))
+                    .finish()
             } else {
-                HttpResponse::NotFound().json(serde_json::json!({
-                    "error": "Server not found"
-                }))
+                HttpResponse::Found()
+                    .append_header(("Location", "/"))
+                    .append_header(("Set-Cookie", format!("flash_message=Server not found; Path=/; Max-Age=5")))
+                    .finish()
             }
         }
         Err(e) => {
             eprintln!("Database error: {}", e);
-            HttpResponse::InternalServerError().json(serde_json::json!({
-                "error": "Failed to remove server"
-            }))
+            HttpResponse::Found()
+                .append_header(("Location", "/"))
+                .append_header(("Set-Cookie", format!("flash_message=Failed to remove server; Path=/; Max-Age=5")))
+                .finish()
         }
     }
 }
 
 #[get("/history/{server_id}")]
-pub async fn server_history(
+pub async fn server_history_page(
+    pool: web::Data<SqlitePool>,
+    tera: web::Data<Tera>,
+    path: web::Path<String>,
+    query: Query<ServerQuery>,
+) -> impl Responder {
+    let server_id = path.into_inner();
+    
+    // Get server info
+    match sqlx::query_as!(
+        Server,
+        r#"
+        SELECT id as "id!", name as "name!", ip_address as "ip_address!", created_at as "created_at!"
+        FROM servers 
+        WHERE id = ?
+        "#,
+        server_id
+    )
+    .fetch_optional(pool.as_ref())
+    .await
+    {
+        Ok(Some(server)) => {
+            let hours = match query.period.as_deref() {
+                Some("1h") => 1,
+                Some("2h") => 2,
+                Some("3h") => 3,
+                Some("24h") => 24,
+                Some("7d") => 24 * 7,
+                _ => 24,
+            };
+            
+            let page = query.page.unwrap_or(1);
+            let limit = 50;
+            let offset = (page - 1) * limit;
+            
+            // Get history data
+            match get_server_history_paginated(&pool, &server_id, hours, limit, offset).await {
+                Ok((history, total_count)) => {
+                    // Get average stats
+                    match get_average_stats(&pool, &server_id, hours, &query.period.as_deref().unwrap_or("24h")).await {
+                        Ok(average_stats) => {
+                            // Prepare chart data
+                            let mut chart_data = serde_json::Map::new();
+                            let mut labels = Vec::new();
+                            let mut cpu_data = Vec::new();
+                            let mut memory_data = Vec::new();
+                            let mut disk_data = Vec::new();
+                            let mut load_data = Vec::new();
+                            let mut network_in_data = Vec::new();
+                            let mut network_out_data = Vec::new();
+                            
+                            for stat in &history {
+                                labels.push(stat.created_at.format("%H:%M").to_string());
+                                cpu_data.push(stat.cpu_usage);
+                                memory_data.push(stat.memory_usage);
+                                disk_data.push(stat.disk_usage);
+                                load_data.push(stat.load_avg);
+                                network_in_data.push(stat.network_in);
+                                network_out_data.push(stat.network_out);
+                            }
+                            
+                            chart_data.insert("labels".to_string(), serde_json::Value::Array(
+                                labels.into_iter().map(serde_json::Value::String).collect()
+                            ));
+                            chart_data.insert("cpu".to_string(), serde_json::Value::Array(
+                                cpu_data.into_iter().map(|v| serde_json::Value::Number(serde_json::Number::from_f64(v).unwrap_or(serde_json::Number::from(0)))).collect()
+                            ));
+                            chart_data.insert("memory".to_string(), serde_json::Value::Array(
+                                memory_data.into_iter().map(|v| serde_json::Value::Number(serde_json::Number::from_f64(v).unwrap_or(serde_json::Number::from(0)))).collect()
+                            ));
+                            chart_data.insert("disk".to_string(), serde_json::Value::Array(
+                                disk_data.into_iter().map(|v| serde_json::Value::Number(serde_json::Number::from_f64(v).unwrap_or(serde_json::Number::from(0)))).collect()
+                            ));
+                            chart_data.insert("load".to_string(), serde_json::Value::Array(
+                                load_data.into_iter().map(|v| serde_json::Value::Number(serde_json::Number::from_f64(v).unwrap_or(serde_json::Number::from(0)))).collect()
+                            ));
+                            chart_data.insert("network_in".to_string(), serde_json::Value::Array(
+                                network_in_data.into_iter().map(|v| serde_json::Value::Number(serde_json::Number::from_f64(v).unwrap_or(serde_json::Number::from(0)))).collect()
+                            ));
+                            chart_data.insert("network_out".to_string(), serde_json::Value::Array(
+                                network_out_data.into_iter().map(|v| serde_json::Value::Number(serde_json::Number::from_f64(v).unwrap_or(serde_json::Number::from(0)))).collect()
+                            ));
+                            
+                            let total_pages = ((total_count as u32 + limit - 1) / limit) as u32;
+                            
+                            let mut context = Context::new();
+                            context.insert("server", &server);
+                            context.insert("history", &history);
+                            context.insert("average_stats", &average_stats);
+                            context.insert("chart_data", &chart_data);
+                            context.insert("current_page", &page);
+                            context.insert("total_pages", &total_pages);
+                            context.insert("time_window", &query.period.as_deref().unwrap_or("24h"));
+                            
+                            match tera.render("history.html", &context) {
+                                Ok(rendered) => HttpResponse::Ok().content_type("text/html").body(rendered),
+                                Err(e) => {
+                                    let error_details = format!("Template error: {}", e);
+                                    eprintln!("{}", error_details);
+                                    HttpResponse::InternalServerError().body(error_details)
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Error getting average stats: {}", e);
+                            HttpResponse::InternalServerError().body("Failed to fetch average stats")
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error getting history: {}", e);
+                    HttpResponse::InternalServerError().body("Failed to fetch server history")
+                }
+            }
+        }
+        Ok(None) => {
+            HttpResponse::NotFound().body("Server not found")
+        }
+        Err(e) => {
+            eprintln!("Database error: {}", e);
+            HttpResponse::InternalServerError().body("Database error")
+        }
+    }
+}
+
+#[get("/api/history/{server_id}")]
+pub async fn server_history_api(
     pool: web::Data<SqlitePool>,
     path: web::Path<String>,
     query: Query<ServerQuery>,
@@ -178,7 +389,7 @@ pub async fn server_history(
     let offset = query.page.unwrap_or(1).saturating_sub(1) * limit;
     
     match get_server_history_paginated(&pool, &server_id, hours, limit, offset).await {
-        Ok(stats) => HttpResponse::Ok().json(stats),
+        Ok((history, _total_count)) => HttpResponse::Ok().json(history),
         Err(e) => {
             eprintln!("Database error: {}", e);
             HttpResponse::InternalServerError().json(serde_json::json!({
@@ -300,12 +511,13 @@ async fn get_servers_with_latest_stats_paginated(
         let latest_stats = sqlx::query_as!(
             ServerStats,
             r#"
-            SELECT id as "id!", server_id as "server_id!", cpu_usage as "cpu_usage!", 
-                   memory_usage as "memory_usage!", memory_total as "memory_total!",
-                   disk_usage as "disk_usage!", load_avg as "load_avg!", 
-                   logged_users as "logged_users!", network_in as "network_in!", 
-                   network_out as "network_out!", uptime as "uptime!", 
-                   created_at as "created_at!"
+                 SELECT id as "id!", server_id as "server_id!", cpu_usage as "cpu_usage!", 
+                     memory_usage as "memory_usage!", memory_total as "memory_total!",
+                     disk_usage as "disk_usage!", load_avg as "load_avg!", 
+                     logged_users as "logged_users!", network_in as "network_in!", 
+                     network_out as "network_out!", network_in_rate as "network_in_rate!", network_out_rate as "network_out_rate!",
+                     disk_read_rate as "disk_read_rate!", disk_write_rate as "disk_write_rate!", uptime as "uptime!", 
+                     created_at as "created_at!"
             FROM server_stats
             WHERE server_id = ?
             ORDER BY created_at DESC
@@ -333,12 +545,13 @@ async fn get_servers_with_latest_stats(pool: &SqlitePool) -> Result<Vec<ServerWi
         let latest_stats = sqlx::query_as!(
             ServerStats,
             r#"
-            SELECT id as "id!", server_id as "server_id!", cpu_usage as "cpu_usage!", 
-                   memory_usage as "memory_usage!", memory_total as "memory_total!",
-                   disk_usage as "disk_usage!", load_avg as "load_avg!", 
-                   logged_users as "logged_users!", network_in as "network_in!", 
-                   network_out as "network_out!", uptime as "uptime!", 
-                   created_at as "created_at!"
+                 SELECT id as "id!", server_id as "server_id!", cpu_usage as "cpu_usage!", 
+                     memory_usage as "memory_usage!", memory_total as "memory_total!",
+                     disk_usage as "disk_usage!", load_avg as "load_avg!", 
+                     logged_users as "logged_users!", network_in as "network_in!", 
+                     network_out as "network_out!", network_in_rate as "network_in_rate!", network_out_rate as "network_out_rate!",
+                     disk_read_rate as "disk_read_rate!", disk_write_rate as "disk_write_rate!", uptime as "uptime!", 
+                     created_at as "created_at!"
             FROM server_stats
             WHERE server_id = ?
             ORDER BY created_at DESC
@@ -364,9 +577,24 @@ async fn get_server_history_paginated(
     hours: i64,
     limit: u32,
     offset: u32,
-) -> Result<Vec<ServerStats>, sqlx::Error> {
+) -> Result<(Vec<ServerStats>, i64), sqlx::Error> {
     let since = (Utc::now() - Duration::hours(hours)).naive_utc();
     
+    // Get total count first
+    let total_count: i64 = sqlx::query_scalar!(
+        r#"
+        SELECT COUNT(*) as "count!: i32"
+        FROM server_stats
+        WHERE server_id = ? AND created_at >= ?
+        "#,
+        server_id,
+        since
+    )
+    .fetch_one(pool)
+    .await?
+    .into(); // Convert i32 to i64
+    
+    // Get the paginated data
     let stats = sqlx::query_as!(
         ServerStats,
         r#"
@@ -374,7 +602,8 @@ async fn get_server_history_paginated(
                memory_usage as "memory_usage!", memory_total as "memory_total!",
                disk_usage as "disk_usage!", load_avg as "load_avg!", 
                logged_users as "logged_users!", network_in as "network_in!", 
-               network_out as "network_out!", uptime as "uptime!", 
+               network_out as "network_out!", network_in_rate as "network_in_rate!", network_out_rate as "network_out_rate!",
+               disk_read_rate as "disk_read_rate!", disk_write_rate as "disk_write_rate!", uptime as "uptime!", 
                created_at as "created_at!"
         FROM server_stats
         WHERE server_id = ? AND created_at >= ?
@@ -389,7 +618,7 @@ async fn get_server_history_paginated(
     .fetch_all(pool)
     .await?;
     
-    Ok(stats)
+    Ok((stats, total_count))
 }
 
 async fn get_server_history(
@@ -402,12 +631,13 @@ async fn get_server_history(
     let stats = sqlx::query_as!(
         ServerStats,
         r#"
-        SELECT id as "id!", server_id as "server_id!", cpu_usage as "cpu_usage!", 
-               memory_usage as "memory_usage!", memory_total as "memory_total!",
-               disk_usage as "disk_usage!", load_avg as "load_avg!", 
-               logged_users as "logged_users!", network_in as "network_in!", 
-               network_out as "network_out!", uptime as "uptime!", 
-               created_at as "created_at!"
+         SELECT id as "id!", server_id as "server_id!", cpu_usage as "cpu_usage!", 
+             memory_usage as "memory_usage!", memory_total as "memory_total!",
+             disk_usage as "disk_usage!", load_avg as "load_avg!", 
+             logged_users as "logged_users!", network_in as "network_in!", 
+             network_out as "network_out!", network_in_rate as "network_in_rate!", network_out_rate as "network_out_rate!",
+             disk_read_rate as "disk_read_rate!", disk_write_rate as "disk_write_rate!", uptime as "uptime!", 
+             created_at as "created_at!"
         FROM server_stats
         WHERE server_id = ? AND created_at >= ?
         ORDER BY created_at ASC

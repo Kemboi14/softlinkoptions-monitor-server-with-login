@@ -1,0 +1,533 @@
+{% extends "base.html" %}
+{% block title %}History - {{ server.name }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3 fade-in">
+  <div class="d-flex justify-content-between align-items-center flex-wrap mb-4">
+    <div>
+      <h2 class="mb-2 fw-bold">
+        <i class="bi bi-clock-history me-2"></i>
+        Performance History – <strong>{{ server.name }}</strong>
+      </h2>
+      <p class="text-muted mb-0">{{ server.ip_address }} • Detailed metrics and analytics</p>
+    </div>
+    <a href="/" class="btn btn-outline-secondary">
+      <i class="bi bi-arrow-left me-1"></i> Back to Dashboard
+    </a>
+  </div>
+
+  <!-- Average Stats Cards -->
+  {% if average_stats %}
+  <div class="row mb-4">
+    <div class="col-md-2 col-sm-4 col-6 mb-3">
+      <div class="card bg-gradient-success text-white border-0">
+        <div class="card-body text-center">
+          <h6 class="card-title mb-1">Avg CPU</h6>
+          <h4 class="mb-0">{{ average_stats.avg_cpu_usage | round(precision=1) }}%</h4>
+          <small>Usage</small>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-2 col-sm-4 col-6 mb-3">
+      <div class="card bg-gradient-info text-white border-0">
+        <div class="card-body text-center">
+          <h6 class="card-title mb-1">Avg Memory</h6>
+          <h4 class="mb-0">{{ average_stats.avg_memory_usage | round(precision=1) }}%</h4>
+          <small>Usage</small>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-2 col-sm-4 col-6 mb-3">
+      <div class="card bg-gradient-warning text-white border-0">
+        <div class="card-body text-center">
+          <h6 class="card-title mb-1">Avg Disk</h6>
+          <h4 class="mb-0">{{ average_stats.avg_disk_usage | round(precision=1) }}%</h4>
+          <small>Usage</small>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-2 col-sm-4 col-6 mb-3">
+      <div class="card bg-gradient-danger text-white border-0">
+        <div class="card-body text-center">
+          <h6 class="card-title mb-1">Avg Load</h6>
+          <h4 class="mb-0">{{ average_stats.avg_load_avg | round(precision=2) }}</h4>
+          <small>Load Avg</small>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-2 col-sm-4 col-6 mb-3">
+      <div class="card bg-gradient-primary text-white border-0">
+        <div class="card-body text-center">
+          <h6 class="card-title mb-1">Net In</h6>
+          <h4 class="mb-0">{{ average_stats.avg_network_in | round(precision=1) }}</h4>
+          <small>KB/s</small>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-2 col-sm-4 col-6 mb-3">
+      <div class="card bg-gradient-secondary text-white border-0">
+        <div class="card-body text-center">
+          <h6 class="card-title mb-1">Net Out</h6>
+          <h4 class="mb-0">{{ average_stats.avg_network_out | round(precision=1) }}</h4>
+          <small>KB/s</small>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Time Range Selector -->
+  <div class="card mb-4 border-0 shadow-lg">
+    <div class="card-header bg-gradient text-white" style="background: var(--primary-gradient);">
+      <h5 class="mb-0">
+        <i class="bi bi-calendar-range me-2"></i>
+        Time Range Selection
+      </h5>
+    </div>
+    <div class="card-body">
+      <div class="row align-items-center">
+        <div class="col-md-3">
+          <label class="form-label fw-semibold">Select Time Window</label>
+          <select id="windowSelect" class="form-select" onchange="changeTimeWindow()">
+            <option value="1h" {% if time_window == "1h" %}selected{% endif %}>Last 1 hour</option>
+            <option value="2h" {% if time_window == "2h" %}selected{% endif %}>Last 2 hours</option>
+            <option value="3h" {% if time_window == "3h" %}selected{% endif %}>Last 3 hours</option>
+            <option value="24h" {% if time_window == "24h" %}selected{% endif %}>Last 24 hours</option>
+            <option value="7d" {% if time_window == "7d" %}selected{% endif %}>Last 7 days</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label fw-semibold">Data Points</label>
+          <div class="form-control-plaintext">
+            <strong>{{ history | length }}</strong> records
+          </div>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label fw-semibold">Current Page</label>
+          <div class="form-control-plaintext">
+            <strong>{{ current_page }}</strong> of {{ total_pages }}
+          </div>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label fw-semibold">Actions</label>
+          <div class="btn-group w-100">
+            <button class="btn btn-outline-primary btn-sm" onclick="refreshData()">
+              <i class="bi bi-arrow-clockwise me-1"></i> Refresh
+            </button>
+            <button class="btn btn-outline-success btn-sm" onclick="exportData()">
+              <i class="bi bi-download me-1"></i> Export
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Charts Grid -->
+  {% if history %}
+  <div class="row text-center g-3 mb-4">
+    <div class="col-12 col-md-6 col-lg-4">
+      <div class="card border-0 shadow-lg">
+        <div class="card-header bg-gradient text-white" style="background: var(--danger-gradient);">
+          <h6 class="mb-0">CPU Usage (%)</h6>
+        </div>
+        <div class="card-body p-2">
+          <canvas id="cpuChart" height="200"></canvas>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-md-6 col-lg-4">
+      <div class="card border-0 shadow-lg">
+        <div class="card-header bg-gradient text-white" style="background: var(--primary-gradient);">
+          <h6 class="mb-0">Memory Usage (%)</h6>
+        </div>
+        <div class="card-body p-2">
+          <canvas id="memoryChart" height="200"></canvas>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-md-6 col-lg-4">
+      <div class="card border-0 shadow-lg">
+        <div class="card-header bg-gradient text-white" style="background: var(--warning-gradient);">
+          <h6 class="mb-0">Disk Usage (%)</h6>
+        </div>
+        <div class="card-body p-2">
+          <canvas id="diskChart" height="200"></canvas>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-md-6 col-lg-4">
+      <div class="card border-0 shadow-lg">
+        <div class="card-header bg-gradient text-white" style="background: var(--success-gradient);">
+          <h6 class="mb-0">Load Average</h6>
+        </div>
+        <div class="card-body p-2">
+          <canvas id="loadChart" height="200"></canvas>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-md-6 col-lg-4">
+      <div class="card border-0 shadow-lg">
+        <div class="card-header bg-gradient text-white" style="background: #17a2b8;">
+          <h6 class="mb-0">Network In (KB/s)</h6>
+        </div>
+        <div class="card-body p-2">
+          <canvas id="netInChart" height="200"></canvas>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-md-6 col-lg-4">
+      <div class="card border-0 shadow-lg">
+        <div class="card-header bg-gradient text-white" style="background: #fd7e14;">
+          <h6 class="mb-0">Network Out (KB/s)</h6>
+        </div>
+        <div class="card-body p-2">
+          <canvas id="netOutChart" height="200"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Detailed History Table -->
+  <div class="card border-0 shadow-lg">
+    <div class="card-header bg-gradient text-white" style="background: var(--primary-gradient);">
+      <div class="d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">
+          <i class="bi bi-table me-2"></i>
+          Detailed Historical Data
+        </h5>
+        <span class="badge bg-light text-dark">
+          {{ history | length }} records
+        </span>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="table-responsive">
+        <table class="table table-striped table-hover">
+          <thead class="table-dark">
+            <tr>
+              <th>
+                <i class="bi bi-clock me-1"></i> Timestamp
+              </th>
+              <th>
+                <i class="bi bi-cpu me-1"></i> CPU (%)
+              </th>
+              <th>
+                <i class="bi bi-memory me-1"></i> Memory (%)
+              </th>
+              <th>
+                <i class="bi bi-hdd me-1"></i> Disk (%)
+              </th>
+              <th>
+                <i class="bi bi-speedometer2 me-1"></i> Load Avg
+              </th>
+              <th>
+                <i class="bi bi-arrow-down me-1"></i> Net In (KB/s)
+              </th>
+              <th>
+                <i class="bi bi-arrow-up me-1"></i> Net Out (KB/s)
+              </th>
+              <th>
+                <i class="bi bi-people me-1"></i> Users
+              </th>
+              <th>
+                <i class="bi bi-hourglass me-1"></i> Uptime (hrs)
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for stat in history %}
+            <tr>
+              <td>
+                <strong>{{ stat.created_at | date(format="%Y-%m-%d %H:%M:%S") }}</strong>
+              </td>
+              <td>
+                <div class="d-flex align-items-center">
+                  <div class="progress me-2" style="width: 60px; height: 8px;">
+                    <div class="progress-bar {% if stat.cpu_usage > 80 %}bg-danger{% elif stat.cpu_usage > 50 %}bg-warning{% else %}bg-success{% endif %}" 
+                         style="width: {{ stat.cpu_usage }}%"></div>
+                  </div>
+                  <span class="fw-semibold">{{ stat.cpu_usage | round(precision=1) }}%</span>
+                </div>
+              </td>
+              <td>
+                <div class="d-flex align-items-center">
+                  <div class="progress me-2" style="width: 60px; height: 8px;">
+                    <div class="progress-bar {% if stat.memory_usage > 80 %}bg-danger{% elif stat.memory_usage > 50 %}bg-warning{% else %}bg-info{% endif %}" 
+                         style="width: {{ stat.memory_usage }}%"></div>
+                  </div>
+                  <span class="fw-semibold">{{ stat.memory_usage | round(precision=1) }}%</span>
+                </div>
+              </td>
+              <td>
+                <div class="d-flex align-items-center">
+                  <div class="progress me-2" style="width: 60px; height: 8px;">
+                    <div class="progress-bar {% if stat.disk_usage > 80 %}bg-danger{% elif stat.disk_usage > 50 %}bg-warning{% else %}bg-primary{% endif %}" 
+                         style="width: {{ stat.disk_usage }}%"></div>
+                  </div>
+                  <span class="fw-semibold">{{ stat.disk_usage | round(precision=1) }}%</span>
+                </div>
+              </td>
+              <td>
+                <span class="badge bg-light text-dark">{{ stat.load_avg | round(precision=2) }}</span>
+              </td>
+              <td>
+                <span class="badge bg-success">{{ stat.network_in | round(precision=1) }}</span>
+              </td>
+              <td>
+                <span class="badge bg-danger">{{ stat.network_out | round(precision=1) }}</span>
+              </td>
+              <td>
+                <span class="badge bg-info">{{ stat.logged_users }}</span>
+              </td>
+              <td>
+                <span class="badge bg-secondary">{{ (stat.uptime / 3600) | round(precision=1) }}</span>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Pagination -->
+      {% if total_pages > 1 %}
+      <nav aria-label="History pagination" class="mt-4">
+        <ul class="pagination justify-content-center">
+          {% if current_page > 1 %}
+          <li class="page-item">
+            <a class="page-link" href="?page={{ current_page - 1 }}&window={{ time_window }}">
+              <i class="bi bi-chevron-left"></i> Prev
+            </a>
+          </li>
+          {% else %}
+          <li class="page-item disabled">
+            <span class="page-link"><i class="bi bi-chevron-left"></i> Prev</span>
+          </li>
+          {% endif %}
+
+          {% for page in range(start=1, end=total_pages + 1) %}
+            {% if page == current_page %}
+              <li class="page-item active">
+                <span class="page-link">{{ page }}</span>
+              </li>
+            {% else %}
+              <li class="page-item">
+                <a class="page-link" href="?page={{ page }}&window={{ time_window }}">{{ page }}</a>
+              </li>
+            {% endif %}
+          {% endfor %}
+
+          {% if current_page < total_pages %}
+          <li class="page-item">
+            <a class="page-link" href="?page={{ current_page + 1 }}&window={{ time_window }}">
+              Next <i class="bi bi-chevron-right"></i>
+            </a>
+          </li>
+          {% else %}
+          <li class="page-item disabled">
+            <span class="page-link">Next <i class="bi bi-chevron-right"></i></span>
+          </li>
+          {% endif %}
+        </ul>
+      </nav>
+      {% endif %}
+    </div>
+  </div>
+  {% else %}
+  <div class="card border-0 shadow-lg">
+    <div class="card-body text-center py-5">
+      <i class="bi bi-clock-history fs-1 text-muted d-block mb-3"></i>
+      <h5>No Historical Data Available</h5>
+      <p class="text-muted">No performance data has been collected for this server yet.</p>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+// Chart data from server
+const chartData = {{ chart_data | default(value="{}") }};
+
+// Initialize charts
+document.addEventListener('DOMContentLoaded', function() {
+    const chartOptions = {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { 
+            legend: { display: false },
+            tooltip: {
+                backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                padding: 12,
+                titleFont: { size: 14 },
+                bodyFont: { size: 12 }
+            }
+        },
+        scales: {
+            y: { 
+                beginAtZero: true,
+                grid: { color: 'rgba(255, 255, 255, 0.1)' }
+            },
+            x: { 
+                grid: { display: false }
+            }
+        }
+    };
+
+    // CPU Chart
+    const cpuCtx = document.getElementById('cpuChart').getContext('2d');
+    new Chart(cpuCtx, {
+        type: 'line',
+        data: {
+            labels: chartData.labels || [],
+            datasets: [{
+                data: chartData.cpu || [],
+                borderColor: '#dc3545',
+                backgroundColor: 'rgba(220, 53, 69, 0.1)',
+                tension: 0.4,
+                fill: true,
+                borderWidth: 2,
+                pointRadius: 3,
+                pointHoverRadius: 5
+            }]
+        },
+        options: {
+            ...chartOptions,
+            scales: {
+                ...chartOptions.scales,
+                y: { ...chartOptions.scales.y, max: 100 }
+            }
+        }
+    });
+
+    // Memory Chart
+    const memCtx = document.getElementById('memoryChart').getContext('2d');
+    new Chart(memCtx, {
+        type: 'line',
+        data: {
+            labels: chartData.labels || [],
+            datasets: [{
+                data: chartData.memory || [],
+                borderColor: '#007bff',
+                backgroundColor: 'rgba(0, 123, 255, 0.1)',
+                tension: 0.4,
+                fill: true,
+                borderWidth: 2,
+                pointRadius: 3,
+                pointHoverRadius: 5
+            }]
+        },
+        options: {
+            ...chartOptions,
+            scales: {
+                ...chartOptions.scales,
+                y: { ...chartOptions.scales.y, max: 100 }
+            }
+        }
+    });
+
+    // Disk Chart
+    const diskCtx = document.getElementById('diskChart').getContext('2d');
+    new Chart(diskCtx, {
+        type: 'line',
+        data: {
+            labels: chartData.labels || [],
+            datasets: [{
+                data: chartData.disk || [],
+                borderColor: '#ffc107',
+                backgroundColor: 'rgba(255, 193, 7, 0.1)',
+                tension: 0.4,
+                fill: true,
+                borderWidth: 2,
+                pointRadius: 3,
+                pointHoverRadius: 5
+            }]
+        },
+        options: {
+            ...chartOptions,
+            scales: {
+                ...chartOptions.scales,
+                y: { ...chartOptions.scales.y, max: 100 }
+            }
+        }
+    });
+
+    // Load Chart
+    const loadCtx = document.getElementById('loadChart').getContext('2d');
+    new Chart(loadCtx, {
+        type: 'line',
+        data: {
+            labels: chartData.labels || [],
+            datasets: [{
+                data: chartData.load || [],
+                borderColor: '#28a745',
+                backgroundColor: 'rgba(40, 167, 69, 0.1)',
+                tension: 0.4,
+                fill: true,
+                borderWidth: 2,
+                pointRadius: 3,
+                pointHoverRadius: 5
+            }]
+        },
+        options: chartOptions
+    });
+
+    // Network In Chart
+    const netInCtx = document.getElementById('netInChart').getContext('2d');
+    new Chart(netInCtx, {
+        type: 'line',
+        data: {
+            labels: chartData.labels || [],
+            datasets: [{
+                data: chartData.network_in || [],
+                borderColor: '#17a2b8',
+                backgroundColor: 'rgba(23, 162, 184, 0.1)',
+                tension: 0.4,
+                fill: true,
+                borderWidth: 2,
+                pointRadius: 3,
+                pointHoverRadius: 5
+            }]
+        },
+        options: chartOptions
+    });
+
+    // Network Out Chart
+    const netOutCtx = document.getElementById('netOutChart').getContext('2d');
+    new Chart(netOutCtx, {
+        type: 'line',
+        data: {
+            labels: chartData.labels || [],
+            datasets: [{
+                data: chartData.network_out || [],
+                borderColor: '#fd7e14',
+                backgroundColor: 'rgba(253, 126, 20, 0.1)',
+                tension: 0.4,
+                fill: true,
+                borderWidth: 2,
+                pointRadius: 3,
+                pointHoverRadius: 5
+            }]
+        },
+        options: chartOptions
+    });
+});
+
+// Change time window
+function changeTimeWindow() {
+    const window = document.getElementById('windowSelect').value;
+    window.location.href = '?window=' + window;
+}
+
+// Refresh data
+function refreshData() {
+    location.reload();
+}
+
+// Export data
+function exportData() {
+    alert('Export functionality would download the current history data as CSV/JSON');
+}
+</script>
+{% endblock %}
