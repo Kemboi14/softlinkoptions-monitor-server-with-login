@@ -6,11 +6,11 @@
   <!-- Header Section -->
   <div class="d-flex justify-content-between align-items-center mb-4">
     <div>
-      <h2 class="mb-2 fw-bold">
+      <h2 class="mb-2 fw-bold" style="font-size: 1.75rem; color: var(--text-primary);">
         <i class="bi bi-speedometer2 me-2"></i>
         Server Dashboard
       </h2>
-      <p class="text-muted mb-0">Real-time monitoring and performance analytics</p>
+      <p class="mb-0" style="color: var(--text-secondary); font-size: 1rem;">Real-time monitoring and performance analytics</p>
     </div>
     <div class="d-flex gap-3">
       <div class="text-end">
@@ -23,62 +23,86 @@
   </div>
 
   <!-- Stats Cards -->
-  <div class="row mb-4">
-    <div class="col-md-3 col-sm-6 mb-3">
-      <div class="card bg-gradient-success text-white border-0">
+  <div class="row mb-4 g-3">
+    <div class="col-md-3 col-sm-6">
+      <div class="card bg-gradient-success text-white border-0 shadow-lg metric-card">
         <div class="card-body">
           <div class="d-flex justify-content-between align-items-center">
             <div>
-              <h6 class="card-title mb-0">Total Servers</h6>
-              <h3 class="mb-0">{{ total_servers }}</h3>
+              <h6 class="card-title mb-1 opacity-90">Total Servers</h6>
+              <h2 class="mb-0 fw-bold display-6">{{ total_servers }}</h2>
+              <div class="mt-2">
+                <small class="opacity-75">
+                  <i class="bi bi-activity me-1"></i>
+                  <span class="online-indicator">{{ online_servers }}</span> online
+                </small>
+              </div>
             </div>
-            <div class="fs-1 opacity-50">
+            <div class="fs-1 opacity-75">
               <i class="bi bi-server"></i>
             </div>
           </div>
         </div>
       </div>
     </div>
-    <div class="col-md-3 col-sm-6 mb-3">
-      <div class="card bg-gradient-info text-white border-0">
+    <div class="col-md-3 col-sm-6">
+      <div class="card bg-gradient-info text-white border-0 shadow-lg metric-card">
         <div class="card-body">
           <div class="d-flex justify-content-between align-items-center">
             <div>
-              <h6 class="card-title mb-0">Online</h6>
-              <h3 class="mb-0">{{ online_servers }}</h3>
+              <h6 class="card-title mb-1 opacity-90">Avg CPU</h6>
+              <h2 class="mb-0 fw-bold display-6">{{ avg_cpu | round(precision=1) }}%</h2>
+              <div class="mt-2">
+                <div class="progress" style="height: 4px;">
+                  <div class="progress-bar {% if avg_cpu > 85 %}bg-danger{% elif avg_cpu > 65 %}bg-warning{% else %}bg-success{% endif %}" 
+                       style="width: {{ avg_cpu }}%"></div>
+                </div>
+              </div>
             </div>
-            <div class="fs-1 opacity-50">
-              <i class="bi bi-check-circle"></i>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-    <div class="col-md-3 col-sm-6 mb-3">
-      <div class="card bg-gradient-warning text-white border-0">
-        <div class="card-body">
-          <div class="d-flex justify-content-between align-items-center">
-            <div>
-              <h6 class="card-title mb-0">Avg CPU</h6>
-              <h3 class="mb-0">{{ avg_cpu | round(precision=1) }}%</h3>
-            </div>
-            <div class="fs-1 opacity-50">
+            <div class="fs-1 opacity-75">
               <i class="bi bi-cpu"></i>
             </div>
           </div>
         </div>
       </div>
     </div>
-    <div class="col-md-3 col-sm-6 mb-3">
-      <div class="card bg-gradient-danger text-white border-0">
+    <div class="col-md-3 col-sm-6">
+      <div class="card bg-gradient-warning text-white border-0 shadow-lg metric-card">
         <div class="card-body">
           <div class="d-flex justify-content-between align-items-center">
             <div>
-              <h6 class="card-title mb-0">Avg Memory</h6>
-              <h3 class="mb-0">{{ avg_memory | round(precision=1) }}%</h3>
+              <h6 class="card-title mb-1 opacity-90">Avg Memory</h6>
+              <h2 class="mb-0 fw-bold display-6">{{ avg_memory | round(precision=1) }}%</h2>
+              <div class="mt-2">
+                <div class="progress" style="height: 4px;">
+                  <div class="progress-bar {% if avg_memory > 85 %}bg-danger{% elif avg_memory > 65 %}bg-warning{% else %}bg-info{% endif %}" 
+                       style="width: {{ avg_memory }}%"></div>
+                </div>
+              </div>
             </div>
-            <div class="fs-1 opacity-50">
+            <div class="fs-1 opacity-75">
               <i class="bi bi-memory"></i>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3 col-sm-6">
+      <div class="card bg-gradient-primary text-white border-0 shadow-lg metric-card">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center">
+            <div>
+              <h6 class="card-title mb-1 opacity-90">Avg Disk</h6>
+              <h2 class="mb-0 fw-bold display-6">{{ avg_disk | round(precision=1) }}%</h2>
+              <div class="mt-2">
+                <div class="progress" style="height: 4px;">
+                  <div class="progress-bar {% if avg_disk > 90 %}bg-danger{% elif avg_disk > 70 %}bg-warning{% else %}bg-light{% endif %}" 
+                       style="width: {{ avg_disk }}%"></div>
+                </div>
+              </div>
+            </div>
+            <div class="fs-1 opacity-75">
+              <i class="bi bi-hdd"></i>
             </div>
           </div>
         </div>
@@ -156,33 +180,15 @@
         <table class="table table-hover align-middle mb-0">
           <thead class="table-dark">
             <tr>
-              <th>
-                <i class="bi bi-server me-1"></i> Server
-              </th>
-              <th>
-                <i class="bi bi-cpu me-1"></i> CPU
-              </th>
-              <th>
-                <i class="bi bi-memory me-1"></i> Memory
-              </th>
-              <th>
-                <i class="bi bi-hdd me-1"></i> Disk
-              </th>
-              <th>
-                <i class="bi bi-speedometer2 me-1"></i> Load
-              </th>
-              <th>
-                <i class="bi bi-people me-1"></i> Users
-              </th>
-              <th>
-                <i class="bi bi-arrow-down-up me-1"></i> Network
-              </th>
-              <th>
-                <i class="bi bi-clock me-1"></i> Uptime
-              </th>
-              <th>
-                <i class="bi bi-gear me-1"></i> Actions
-              </th>
+              <th style="font-size: 1rem;"><i class="bi bi-server me-1"></i> Server</th>
+              <th style="font-size: 1rem;"><i class="bi bi-cpu me-1"></i> CPU</th>
+              <th style="font-size: 1rem;"><i class="bi bi-memory me-1"></i> Memory</th>
+              <th style="font-size: 1rem;"><i class="bi bi-hdd me-1"></i> Disk</th>
+              <th style="font-size: 1rem;"><i class="bi bi-speedometer2 me-1"></i> Load</th>
+              <th style="font-size: 1rem;"><i class="bi bi-people me-1"></i> Users</th>
+              <th style="font-size: 1rem; min-width: 115px;"><i class="bi bi-arrow-down-up me-1"></i> Download / Upload</th>
+              <th style="font-size: 1rem;"><i class="bi bi-clock me-1"></i> Uptime</th>
+              <th style="font-size: 1rem;"><i class="bi bi-gear me-1"></i> Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -202,11 +208,13 @@
               <td>
                 {% if stats %}
                             <div class="d-flex align-items-center">
-                              <div class="progress me-2 rounded-pill cpu-bar" style="width: 120px; height: 12px;">
+                              <div class="progress me-2 rounded-pill cpu-bar" style="width: 120px; height: 16px; background-color: rgba(255,255,255,0.15);">
                                 <div class="progress-bar {% if stats.cpu_usage > 85 %}bg-danger{% elif stats.cpu_usage > 65 %}bg-warning{% else %}bg-success{% endif %} rounded-pill" 
-                                     style="width: {{ stats.cpu_usage }}%"></div>
+                                     style="width: {{ stats.cpu_usage }}%; transition: width 0.6s ease;"></div>
                               </div>
-                              <span class="fw-semibold ms-1">{{ stats.cpu_usage | round(precision=1) }}%</span>
+                              <div class="metric-value">
+                                <span class="fw-bold fs-6 {% if stats.cpu_usage > 85 %}text-danger{% elif stats.cpu_usage > 65 %}text-warning{% else %}text-success{% endif %}">{{ stats.cpu_usage | round(precision=1) }}%</span>
+                              </div>
                             </div>
                 {% else %}
                   <span class="badge bg-secondary">Offline</span>
@@ -215,13 +223,13 @@
               <td>
                 {% if stats %}
                   <div class="d-flex align-items-center">
-                    <div class="progress me-2 rounded-pill mem-bar" style="width: 120px; height: 12px;">
+                    <div class="progress me-2 rounded-pill mem-bar" style="width: 120px; height: 16px; background-color: rgba(255,255,255,0.15);">
                       <div class="progress-bar {% if stats.memory_usage > 85 %}bg-danger{% elif stats.memory_usage > 65 %}bg-warning{% else %}bg-info{% endif %} rounded-pill" 
-                           style="width: {{ stats.memory_usage }}%"></div>
+                           style="width: {{ stats.memory_usage }}%; transition: width 0.6s ease;"></div>
                     </div>
-                    <div>
-                      <div class="fw-semibold">{{ stats.memory_usage | round(precision=1) }}%</div>
-                      <small class="text-muted">{{ stats.memory_total | round(precision=2) }} GB total</small>
+                    <div class="metric-details">
+                      <div class="fw-bold fs-6 {% if stats.memory_usage > 85 %}text-danger{% elif stats.memory_usage > 65 %}text-warning{% else %}text-info{% endif %}">{{ stats.memory_usage | round(precision=1) }}%</div>
+                      <div class="memory-total fw-semibold text-primary fs-7">{{ stats.memory_total | round(precision=2) }} GB</div>
                     </div>
                   </div>
                 {% else %}
@@ -231,11 +239,11 @@
               <td>
                 {% if stats %}
                   <div class="d-flex align-items-center">
-                    <div class="progress me-2 rounded-pill disk-bar" style="width: 120px; height: 12px;">
+                    <div class="progress me-2 rounded-pill disk-bar" style="width: 120px; height: 16px; background-color: rgba(255,255,255,0.15);">
                       <div class="progress-bar {% if stats.disk_usage > 90 %}bg-danger{% elif stats.disk_usage > 70 %}bg-warning{% else %}bg-primary{% endif %} rounded-pill" 
-                           style="width: {{ stats.disk_usage }}%"></div>
+                           style="width: {{ stats.disk_usage }}%; transition: width 0.6s ease;"></div>
                     </div>
-                    <span class="fw-semibold">{{ stats.disk_usage | round(precision=1) }}%</span>
+                    <span class="fw-bold fs-6 {% if stats.disk_usage > 90 %}text-danger{% elif stats.disk_usage > 70 %}text-warning{% else %}text-primary{% endif %}">{{ stats.disk_usage | round(precision=1) }}%</span>
                   </div>
                 {% else %}
                   <span class="badge bg-secondary">N/A</span>
@@ -243,30 +251,41 @@
               </td>
               <td>
                 {% if stats %}
-                  <span class="badge bg-light text-dark">{{ stats.load_avg | round(precision=2) }}</span>
+                  <div class="load-metric">
+                    <span class="badge {% if stats.load_avg > 2.0 %}bg-danger{% elif stats.load_avg > 1.0 %}bg-warning{% else %}bg-success{% endif %} fs-6">
+                      {{ stats.load_avg | round(precision=2) }}
+                    </span>
+                  </div>
                 {% else %}
                   <span class="badge bg-secondary">N/A</span>
                 {% endif %}
               </td>
               <td>
                 {% if stats %}
-                  <span class="badge bg-info">{{ stats.logged_users }}</span>
+                  <div class="users-metric">
+                    <span class="badge {% if stats.logged_users > 10 %}bg-warning{% else %}bg-info{% endif %} fs-6">
+                      <i class="bi bi-people-fill me-1"></i>
+                      {{ stats.logged_users }}
+                    </span>
+                  </div>
                 {% else %}
                   <span class="badge bg-secondary">N/A</span>
                 {% endif %}
               </td>
-              <td>
+              <td class="network-cell">
                 {% if stats %}
-                  <div class="small">
-                    <div class="text-success">
-                      <i class="bi bi-arrow-down"></i> <span class="net-in" data-bytes="{{ stats.network_in }}">{{ stats.network_in | round(precision=1) }}</span>
+                  <div class="network-rates">
+                    <div class="network-download mb-1">
+                      <div class="d-flex align-items-center gap-1">
+                        <i class="bi bi-arrow-down-circle-fill text-success"></i>
+                        <span class="net-in fw-bold text-success" data-bytes="{{ stats.network_in_rate | round(precision=2) }}" title="Download">—</span>
+                      </div>
                     </div>
-                    <div class="text-danger">
-                      <i class="bi bi-arrow-up"></i> <span class="net-out" data-bytes="{{ stats.network_out }}">{{ stats.network_out | round(precision=1) }}</span>
-                    </div>
-                    <div class="mt-1 small text-muted">
-                      <div>In rate: {{ stats.network_in_rate | round(precision=1) }} B/s</div>
-                      <div>Out rate: {{ stats.network_out_rate | round(precision=1) }} B/s</div>
+                    <div class="network-upload">
+                      <div class="d-flex align-items-center gap-1">
+                        <i class="bi bi-arrow-up-circle-fill text-danger"></i>
+                        <span class="net-out fw-bold text-danger" data-bytes="{{ stats.network_out_rate | round(precision=2) }}" title="Upload">—</span>
+                      </div>
                     </div>
                   </div>
                 {% else %}
@@ -275,19 +294,21 @@
               </td>
               <td>
                 {% if stats %}
-                  <span class="small text-muted" id="uptime-{{ server.id }}">Loading...</span>
+                  <div class="uptime-display">
+                    <span class="uptime-value fw-bold text-info fs-6" id="uptime-{{ server.id }}">Loading...</span>
+                  </div>
                 {% else %}
                   <span class="badge bg-secondary">N/A</span>
                 {% endif %}
               </td>
               <td>
                 <div class="btn-group btn-group-sm" role="group">
-                  <a href="/history/{{ server.id }}" class="btn btn-outline-primary" title="View History">
+                  <a href="/history/{{ server.id }}?period=24h" class="btn btn-outline-primary" title="View History">
                     <i class="bi bi-clock-history"></i>
                   </a>
-                  <button class="btn btn-outline-success" title="Edit Server">
+                  <a href="/servers/{{ server.id }}/edit" class="btn btn-outline-success" title="Edit Server">
                     <i class="bi bi-pencil"></i>
-                  </button>
+                  </a>
                   <button class="btn btn-outline-danger" onclick="confirmDeleteServer('{{ server.id }}', '{{ server.name }}')" title="Delete Server">
                     <i class="bi bi-trash"></i>
                   </button>
@@ -313,19 +334,240 @@
 </div>
 
 <style>
+/* Enhanced metric cards styling */
+.metric-card {
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.metric-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, rgba(255,255,255,0.3) 0%, rgba(255,255,255,0.1) 100%);
+}
+
+.metric-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
+}
+
+.metric-card .display-6 {
+  font-size: 2.5rem;
+  font-weight: 700;
+  text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+/* Enhanced progress bars */
+.progress {
+  background-color: rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.progress-bar {
+  transition: width 0.8s ease;
+  border-radius: 8px;
+  position: relative;
+}
+
+.progress-bar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, rgba(255,255,255,0.2) 0%, transparent 100%);
+}
+
+/* Enhanced status indicators */
+.status-indicator {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.status-indicator.online {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.6);
+  animation: pulse 2s infinite;
+}
+
+.status-indicator.offline {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  box-shadow: 0 0 20px rgba(239, 68, 68, 0.6);
+}
+
+@keyframes pulse {
+  0% { 
+    box-shadow: 0 0 20px rgba(16, 185, 129, 0.6);
+    transform: scale(1);
+  }
+  50% { 
+    box-shadow: 0 0 30px rgba(16, 185, 129, 0.8);
+    transform: scale(1.1);
+  }
+  100% { 
+    box-shadow: 0 0 20px rgba(16, 185, 129, 0.6);
+    transform: scale(1);
+  }
+}
+
+/* Enhanced table styling */
+.table {
+  color: var(--text-primary);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.table-dark {
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+}
+
+.table td, .table th {
+  font-size: 0.95rem;
+  padding: 0.85rem 0.75rem;
+  vertical-align: middle;
+}
+
+.server-row {
+  transition: all 0.3s ease;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+
+.server-row:hover {
+  background: linear-gradient(90deg, rgba(102, 126, 234, 0.15) 0%, rgba(102, 126, 234, 0.05) 100%);
+  transform: translateX(5px);
+}
+
+/* Metric value styling */
+.metric-value .fs-6,
+.metric-details .fs-6 {
+  font-size: 1rem !important;
+  font-weight: 600;
+}
+
+.metric-details .fs-7 {
+  font-size: 0.8rem !important;
+}
+
+/* Enhanced uptime display */
+.uptime-display {
+  position: relative;
+}
+
+.uptime-value {
+  font-size: 0.95rem !important;
+  font-weight: 600 !important;
+  color: #3b82f6 !important;
+  text-shadow: 0 0 8px rgba(59, 130, 246, 0.3);
+  background: rgba(59, 130, 246, 0.1);
+  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  display: inline-block;
+  min-width: 80px;
+  text-align: center;
+}
+
+/* Enhanced memory total display */
+.memory-total {
+  font-size: 0.85rem !important;
+  color: #3b82f6 !important;
+  background: rgba(59, 130, 246, 0.08);
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+  border: 1px solid rgba(59, 130, 246, 0.15);
+  display: inline-block;
+  margin-top: 0.2rem;
+  text-shadow: 0 0 6px rgba(59, 130, 246, 0.2);
+}
+
+/* Enhanced badges */
+.badge {
+  font-weight: 500;
+  padding: 0.5em 0.75em;
+  border-radius: 6px;
+  font-size: 0.875rem;
+}
+
+/* Network rates styling */
+.network-cell {
+  min-width: 140px;
+  font-size: 0.9rem;
+}
+
+.network-rates .net-in,
+.network-rates .net-out {
+  font-size: 0.9rem;
+  font-weight: 600;
+  min-width: 60px;
+  display: inline-block;
+}
+
+.network-rates .text-success { 
+  color: #34d399 !important; 
+  text-shadow: 0 0 10px rgba(52, 211, 153, 0.3);
+}
+
+.network-rates .text-danger { 
+  color: #f87171 !important;
+  text-shadow: 0 0 10px rgba(248, 113, 113, 0.3);
+}
+
+/* Enhanced button styling */
 .btn-gradient {
   background: var(--primary-gradient);
   border: none;
   transition: all 0.3s ease;
+  border-radius: 8px;
+  font-weight: 500;
 }
 
 .btn-gradient:hover {
   transform: translateY(-2px);
-  box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+  box-shadow: 0 10px 25px rgba(102, 126, 234, 0.4);
 }
 
+/* Form controls */
+.form-control, .form-select {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+  border-radius: 8px;
+  transition: all 0.3s ease;
+}
+
+.form-control:focus, .form-select:focus {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: #667eea;
+  box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+  color: var(--text-primary);
+}
+
+/* Card styling */
+.card {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  transition: all 0.3s ease;
+  border-radius: 12px;
+}
+
+.card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 15px 40px rgba(0, 0, 0, 0.2);
+}
+
+/* Gradient definitions */
 .bg-gradient-success {
-  background: var(--success-gradient) !important;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
 }
 
 .bg-gradient-info {
@@ -333,109 +575,57 @@
 }
 
 .bg-gradient-warning {
-  background: var(--warning-gradient) !important;
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%) !important;
 }
 
 .bg-gradient-danger {
-  background: var(--danger-gradient) !important;
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%) !important;
 }
 
-.card {
-  background: var(--card-bg);
-  border: 1px solid var(--border-color);
-  transition: all 0.3s ease;
+.bg-gradient-primary {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%) !important;
 }
 
-.card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
-}
-
-.progress {
-  background-color: rgba(255, 255, 255, 0.1);
-}
-
-.progress-bar {
-  transition: width 0.6s ease;
-}
-
-.status-indicator {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.status-indicator.online {
-  background: #10b981;
-  box-shadow: 0 0 12px rgba(16, 185, 129, 0.6);
-  animation: pulse 2s infinite;
-}
-
-.status-indicator.offline {
-  background: #ef4444;
-  box-shadow: 0 0 12px rgba(239, 68, 68, 0.6);
-}
-
-@keyframes pulse {
-  0% { box-shadow: 0 0 12px rgba(16, 185, 129, 0.6); }
-  50% { box-shadow: 0 0 20px rgba(16, 185, 129, 0.8); }
-  100% { box-shadow: 0 0 12px rgba(16, 185, 129, 0.6); }
-}
-
-.server-row {
-  transition: all 0.2s ease;
-}
-
-.server-row:hover {
-  background: rgba(102, 126, 234, 0.1);
-}
-
-.form-control, .form-select {
-  background: var(--dark-bg);
-  border: 1px solid var(--border-color);
-  color: var(--text-primary);
-}
-
-.form-control:focus, .form-select:focus {
-  background: var(--dark-bg);
-  border-color: #667eea;
-  box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
-  color: var(--text-primary);
-}
-
-.form-floating label {
-  color: var(--text-secondary);
-}
-
-.table {
-  color: var(--text-primary);
-}
-
-.table-dark {
-  background: var(--dark-bg);
-}
-
+/* Button hover states */
 .btn-outline-primary:hover {
   background: #667eea;
   border-color: #667eea;
+  transform: translateY(-1px);
 }
 
 .btn-outline-success:hover {
   background: #10b981;
   border-color: #10b981;
+  transform: translateY(-1px);
 }
 
 .btn-outline-danger:hover {
   background: #ef4444;
   border-color: #ef4444;
+  transform: translateY(-1px);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .metric-card .display-6 {
+    font-size: 2rem;
+  }
+  
+  .network-cell {
+    min-width: 120px;
+  }
+  
+  .table td, .table th {
+    padding: 0.65rem 0.5rem;
+    font-size: 0.85rem;
+  }
 }
 </style>
 
 <script>
-// Export data function
+// Export current server list as CSV (server-side download)
 function exportData() {
-    alert('Export functionality would be implemented here to download server data as CSV/JSON');
+    window.location.href = '/export';
 }
 
 // Uptime data
@@ -479,20 +669,20 @@ document.addEventListener('DOMContentLoaded', function() {
             uptimeElement.textContent = formatUptime(uptimeData[serverId]);
         }
     });
-  // Format network fields (bytes -> human readable/sec)
+  // Format network fields (bytes/sec -> human readable)
   function formatBytesPerSec(bytes) {
-    if (!bytes && bytes !== 0) return '—';
-    const abs = Math.abs(bytes);
-    if (abs < 1024) return bytes.toFixed(1) + ' B/s';
-    if (abs < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB/s';
-    return (bytes / (1024 * 1024)).toFixed(2) + ' MB/s';
+    if (bytes === undefined || bytes === null || isNaN(bytes)) return '0 B/s';
+    const b = Number(bytes);
+    const abs = Math.abs(b);
+    if (abs < 1024) return b.toFixed(1) + ' B/s';
+    if (abs < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB/s';
+    return (b / (1024 * 1024)).toFixed(2) + ' MB/s';
   }
 
   document.querySelectorAll('.net-in, .net-out').forEach(function(el) {
-    const raw = parseFloat(el.getAttribute('data-bytes'));
-    if (!isNaN(raw)) {
-      el.textContent = formatBytesPerSec(raw);
-    }
+    var raw = el.getAttribute('data-bytes');
+    if (raw !== null && raw !== '') raw = parseFloat(String(raw).replace(',', '.').trim());
+    el.textContent = formatBytesPerSec(isNaN(raw) ? 0 : raw);
   });
   // Start uptime ticker: increment and refresh every second for a live feel
   setInterval(function() {

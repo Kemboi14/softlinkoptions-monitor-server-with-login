@@ -14,9 +14,9 @@
             --warning-gradient: linear-gradient(135deg, #f2994a 0%, #f2c94c 100%);
             --dark-bg: #0f172a;
             --card-bg: #1e293b;
-            --text-primary: #f1f5f9;
-            --text-secondary: #94a3b8;
-            --border-color: #334155;
+            --text-primary: #f8fafc;
+            --text-secondary: #e2e8f0;
+            --border-color: #475569;
         }
 
         * {
@@ -30,6 +30,8 @@
             color: var(--text-primary);
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             min-height: 100vh;
+            font-size: 1.05rem;
+            line-height: 1.55;
         }
 
         .navbar {
@@ -98,6 +100,59 @@
             max-width: 1400px;
         }
 
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+        }
+
+        .card-body, .card-header {
+            color: var(--text-primary);
+        }
+
+        .text-muted {
+            color: var(--text-secondary) !important;
+        }
+
+        .form-label, .form-control-plaintext {
+            color: var(--text-primary);
+        }
+
+        .table {
+            color: var(--text-primary);
+        }
+
+        .table th, .table td {
+            font-size: 1rem;
+            vertical-align: middle;
+        }
+
+        .table-dark {
+            background: #1e293b;
+            color: var(--text-primary);
+            border-color: var(--border-color);
+        }
+
+        .table thead th {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .page-link {
+            background: var(--card-bg);
+            border-color: var(--border-color);
+            color: var(--text-primary);
+        }
+
+        .page-item.disabled .page-link {
+            color: var(--text-secondary);
+        }
+
+        .pagination .page-item.active .page-link {
+            background: #667eea;
+            border-color: #667eea;
+        }
+
         @keyframes slideInDown {
             from {
                 transform: translateY(-20px);
@@ -149,7 +204,10 @@
         <i class="bi bi-server"></i> Server Monitor
       </span>
     </a>
-    <div class="ms-auto">
+    <div class="ms-auto d-flex align-items-center gap-3">
+      <a href="/history" class="btn btn-outline-light btn-sm">
+        <i class="bi bi-clock-history me-1"></i> All History
+      </a>
       <span class="badge bg-success">
         <i class="bi bi-circle-fill me-1"></i> System Online
       </span>

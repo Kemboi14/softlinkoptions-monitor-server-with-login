@@ -5,11 +5,11 @@
 <div class="container-fluid py-3 fade-in">
   <div class="d-flex justify-content-between align-items-center flex-wrap mb-4">
     <div>
-      <h2 class="mb-2 fw-bold">
+      <h2 class="mb-2 fw-bold" style="font-size: 1.6rem; color: var(--text-primary);">
         <i class="bi bi-clock-history me-2"></i>
         Performance History – <strong>{{ server.name }}</strong>
       </h2>
-      <p class="text-muted mb-0">{{ server.ip_address }} • Detailed metrics and analytics</p>
+      <p class="mb-0" style="color: var(--text-secondary);">{{ server.ip_address }} • Detailed metrics and analytics</p>
     </div>
     <a href="/" class="btn btn-outline-secondary">
       <i class="bi bi-arrow-left me-1"></i> Back to Dashboard
@@ -18,58 +18,58 @@
 
   <!-- Average Stats Cards -->
   {% if average_stats %}
-  <div class="row mb-4">
-    <div class="col-md-2 col-sm-4 col-6 mb-3">
-      <div class="card bg-gradient-success text-white border-0">
-        <div class="card-body text-center">
-          <h6 class="card-title mb-1">Avg CPU</h6>
-          <h4 class="mb-0">{{ average_stats.avg_cpu_usage | round(precision=1) }}%</h4>
-          <small>Usage</small>
+  <div class="row mb-4 g-3">
+    <div class="col-md-2 col-sm-4 col-6">
+      <div class="card bg-gradient-success text-white border-0 shadow">
+        <div class="card-body text-center py-3">
+          <h6 class="card-title mb-1 opacity-90">Avg CPU</h6>
+          <h4 class="mb-0 fw-bold">{{ average_stats.cpu_usage | round(precision=1) }}%</h4>
+          <small class="opacity-90">Usage</small>
         </div>
       </div>
     </div>
-    <div class="col-md-2 col-sm-4 col-6 mb-3">
-      <div class="card bg-gradient-info text-white border-0">
-        <div class="card-body text-center">
-          <h6 class="card-title mb-1">Avg Memory</h6>
-          <h4 class="mb-0">{{ average_stats.avg_memory_usage | round(precision=1) }}%</h4>
-          <small>Usage</small>
+    <div class="col-md-2 col-sm-4 col-6">
+      <div class="card bg-gradient-info text-white border-0 shadow">
+        <div class="card-body text-center py-3">
+          <h6 class="card-title mb-1 opacity-90">Avg Memory</h6>
+          <h4 class="mb-0 fw-bold">{{ average_stats.memory_usage | round(precision=1) }}%</h4>
+          <small class="opacity-90">Usage</small>
         </div>
       </div>
     </div>
-    <div class="col-md-2 col-sm-4 col-6 mb-3">
-      <div class="card bg-gradient-warning text-white border-0">
-        <div class="card-body text-center">
-          <h6 class="card-title mb-1">Avg Disk</h6>
-          <h4 class="mb-0">{{ average_stats.avg_disk_usage | round(precision=1) }}%</h4>
-          <small>Usage</small>
+    <div class="col-md-2 col-sm-4 col-6">
+      <div class="card bg-gradient-warning text-white border-0 shadow">
+        <div class="card-body text-center py-3">
+          <h6 class="card-title mb-1 opacity-90">Avg Disk</h6>
+          <h4 class="mb-0 fw-bold">{{ average_stats.disk_usage | round(precision=1) }}%</h4>
+          <small class="opacity-90">Usage</small>
         </div>
       </div>
     </div>
-    <div class="col-md-2 col-sm-4 col-6 mb-3">
-      <div class="card bg-gradient-danger text-white border-0">
-        <div class="card-body text-center">
-          <h6 class="card-title mb-1">Avg Load</h6>
-          <h4 class="mb-0">{{ average_stats.avg_load_avg | round(precision=2) }}</h4>
-          <small>Load Avg</small>
+    <div class="col-md-2 col-sm-4 col-6">
+      <div class="card bg-gradient-danger text-white border-0 shadow">
+        <div class="card-body text-center py-3">
+          <h6 class="card-title mb-1 opacity-90">Avg Load</h6>
+          <h4 class="mb-0 fw-bold">{{ average_stats.load_avg | round(precision=2) }}</h4>
+          <small class="opacity-90">Load Avg</small>
         </div>
       </div>
     </div>
-    <div class="col-md-2 col-sm-4 col-6 mb-3">
-      <div class="card bg-gradient-primary text-white border-0">
-        <div class="card-body text-center">
-          <h6 class="card-title mb-1">Net In</h6>
-          <h4 class="mb-0">{{ average_stats.avg_network_in | round(precision=1) }}</h4>
-          <small>KB/s</small>
+    <div class="col-md-2 col-sm-4 col-6">
+      <div class="card bg-gradient-primary text-white border-0 shadow">
+        <div class="card-body text-center py-3">
+          <h6 class="card-title mb-1 opacity-90">Download</h6>
+          <h4 class="mb-0 fw-bold">{{ avg_net_in_rate_kb | round(precision=1) }}</h4>
+          <small class="opacity-90">KB/s (avg)</small>
         </div>
       </div>
     </div>
-    <div class="col-md-2 col-sm-4 col-6 mb-3">
-      <div class="card bg-gradient-secondary text-white border-0">
-        <div class="card-body text-center">
-          <h6 class="card-title mb-1">Net Out</h6>
-          <h4 class="mb-0">{{ average_stats.avg_network_out | round(precision=1) }}</h4>
-          <small>KB/s</small>
+    <div class="col-md-2 col-sm-4 col-6">
+      <div class="card bg-gradient-secondary text-white border-0 shadow">
+        <div class="card-body text-center py-3">
+          <h6 class="card-title mb-1 opacity-90">Upload</h6>
+          <h4 class="mb-0 fw-bold">{{ avg_net_out_rate_kb | round(precision=1) }}</h4>
+          <small class="opacity-90">KB/s (avg)</small>
         </div>
       </div>
     </div>
@@ -77,18 +77,18 @@
   {% endif %}
 
   <!-- Time Range Selector -->
-  <div class="card mb-4 border-0 shadow-lg">
-    <div class="card-header bg-gradient text-white" style="background: var(--primary-gradient);">
+  <div class="card mb-4 border-0 shadow-lg" style="background: var(--card-bg); border: 1px solid var(--border-color);">
+    <div class="card-header bg-gradient text-white" style="background: var(--primary-gradient); font-size: 1.1rem;">
       <h5 class="mb-0">
         <i class="bi bi-calendar-range me-2"></i>
         Time Range Selection
       </h5>
     </div>
-    <div class="card-body">
+    <div class="card-body" style="color: var(--text-primary);">
       <div class="row align-items-center">
         <div class="col-md-3">
-          <label class="form-label fw-semibold">Select Time Window</label>
-          <select id="windowSelect" class="form-select" onchange="changeTimeWindow()">
+          <label class="form-label fw-semibold" style="color: var(--text-primary);">Select Time Window</label>
+          <select id="periodSelect" class="form-select" onchange="changeTimeWindow()">
             <option value="1h" {% if time_window == "1h" %}selected{% endif %}>Last 1 hour</option>
             <option value="2h" {% if time_window == "2h" %}selected{% endif %}>Last 2 hours</option>
             <option value="3h" {% if time_window == "3h" %}selected{% endif %}>Last 3 hours</option>
@@ -169,7 +169,7 @@
     <div class="col-12 col-md-6 col-lg-4">
       <div class="card border-0 shadow-lg">
         <div class="card-header bg-gradient text-white" style="background: #17a2b8;">
-          <h6 class="mb-0">Network In (KB/s)</h6>
+          <h6 class="mb-0">Download (KB/s)</h6>
         </div>
         <div class="card-body p-2">
           <canvas id="netInChart" height="200"></canvas>
@@ -179,10 +179,30 @@
     <div class="col-12 col-md-6 col-lg-4">
       <div class="card border-0 shadow-lg">
         <div class="card-header bg-gradient text-white" style="background: #fd7e14;">
-          <h6 class="mb-0">Network Out (KB/s)</h6>
+          <h6 class="mb-0">Upload (KB/s)</h6>
         </div>
         <div class="card-body p-2">
           <canvas id="netOutChart" height="200"></canvas>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-md-6 col-lg-4">
+      <div class="card border-0 shadow-lg">
+        <div class="card-header bg-gradient text-white" style="background: var(--success-gradient);">
+          <h6 class="mb-0">Disk Read (KB/s)</h6>
+        </div>
+        <div class="card-body p-2">
+          <canvas id="diskReadChart" height="200"></canvas>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-md-6 col-lg-4">
+      <div class="card border-0 shadow-lg">
+        <div class="card-header bg-gradient text-white" style="background: var(--danger-gradient);">
+          <h6 class="mb-0">Disk Write (KB/s)</h6>
+        </div>
+        <div class="card-body p-2">
+          <canvas id="diskWriteChart" height="200"></canvas>
         </div>
       </div>
     </div>
@@ -201,9 +221,9 @@
         </span>
       </div>
     </div>
-    <div class="card-body">
+    <div class="card-body" style="color: var(--text-primary);">
       <div class="table-responsive">
-        <table class="table table-striped table-hover">
+        <table class="table table-striped table-hover" style="color: var(--text-primary); font-size: 1rem;">
           <thead class="table-dark">
             <tr>
               <th>
@@ -222,10 +242,16 @@
                 <i class="bi bi-speedometer2 me-1"></i> Load Avg
               </th>
               <th>
-                <i class="bi bi-arrow-down me-1"></i> Net In (KB/s)
+                <i class="bi bi-arrow-down me-1"></i> Download (KB/s)
               </th>
               <th>
-                <i class="bi bi-arrow-up me-1"></i> Net Out (KB/s)
+                <i class="bi bi-arrow-up me-1"></i> Upload (KB/s)
+              </th>
+              <th>
+                <i class="bi bi-arrow-down-up me-1"></i> Disk Read (KB/s)
+              </th>
+              <th>
+                <i class="bi bi-arrow-up-down me-1"></i> Disk Write (KB/s)
               </th>
               <th>
                 <i class="bi bi-people me-1"></i> Users
@@ -269,13 +295,19 @@
                 </div>
               </td>
               <td>
-                <span class="badge bg-light text-dark">{{ stat.load_avg | round(precision=2) }}</span>
+                <span class="badge bg-light text-dark" style="font-size: 0.9rem;">{{ stat.load_avg | round(precision=2) }}</span>
               </td>
               <td>
-                <span class="badge bg-success">{{ stat.network_in | round(precision=1) }}</span>
+                <span class="badge bg-success" style="font-size: 0.9rem;">{{ (stat.network_in_rate / 1024.0) | round(precision=1) }} KB/s</span>
               </td>
               <td>
-                <span class="badge bg-danger">{{ stat.network_out | round(precision=1) }}</span>
+                <span class="badge bg-danger" style="font-size: 0.9rem;">{{ (stat.network_out_rate / 1024.0) | round(precision=1) }} KB/s</span>
+              </td>
+              <td>
+                <span class="badge bg-success" style="font-size: 0.9rem;">{{ (stat.disk_read_rate / 1024.0) | round(precision=1) }} KB/s</span>
+              </td>
+              <td>
+                <span class="badge bg-warning text-dark" style="font-size: 0.9rem;">{{ (stat.disk_write_rate / 1024.0) | round(precision=1) }} KB/s</span>
               </td>
               <td>
                 <span class="badge bg-info">{{ stat.logged_users }}</span>
@@ -295,7 +327,7 @@
         <ul class="pagination justify-content-center">
           {% if current_page > 1 %}
           <li class="page-item">
-            <a class="page-link" href="?page={{ current_page - 1 }}&window={{ time_window }}">
+            <a class="page-link" href="?page={{ current_page - 1 }}&period={{ time_window }}">
               <i class="bi bi-chevron-left"></i> Prev
             </a>
           </li>
@@ -312,14 +344,14 @@
               </li>
             {% else %}
               <li class="page-item">
-                <a class="page-link" href="?page={{ page }}&window={{ time_window }}">{{ page }}</a>
+                <a class="page-link" href="?page={{ page }}&period={{ time_window }}">{{ page }}</a>
               </li>
             {% endif %}
           {% endfor %}
 
           {% if current_page < total_pages %}
           <li class="page-item">
-            <a class="page-link" href="?page={{ current_page + 1 }}&window={{ time_window }}">
+            <a class="page-link" href="?page={{ current_page + 1 }}&period={{ time_window }}">
               Next <i class="bi bi-chevron-right"></i>
             </a>
           </li>
@@ -346,9 +378,14 @@
 
 <!-- Chart.js -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script type="application/json" id="chart-data-json">{% if chart_data_json %}{{ chart_data_json | safe }}{% else %}{}{% endif %}</script>
 <script>
-// Chart data from server
-const chartData = {{ chart_data | default(value="{}") }};
+// Chart data from server (parsed from JSON for correct encoding)
+var chartData = {};
+try {
+  var el = document.getElementById('chart-data-json');
+  if (el && el.textContent) chartData = JSON.parse(el.textContent);
+} catch (e) { console.warn('Chart data parse failed', e); }
 
 // Initialize charts
 document.addEventListener('DOMContentLoaded', function() {
@@ -480,7 +517,8 @@ document.addEventListener('DOMContentLoaded', function() {
         data: {
             labels: chartData.labels || [],
             datasets: [{
-                data: chartData.network_in || [],
+                label: 'Network In (KB/s)',
+                data: chartData.network_in_rate || [],
                 borderColor: '#17a2b8',
                 backgroundColor: 'rgba(23, 162, 184, 0.1)',
                 tension: 0.4,
@@ -500,7 +538,8 @@ document.addEventListener('DOMContentLoaded', function() {
         data: {
             labels: chartData.labels || [],
             datasets: [{
-                data: chartData.network_out || [],
+                label: 'Network Out (KB/s)',
+                data: chartData.network_out_rate || [],
                 borderColor: '#fd7e14',
                 backgroundColor: 'rgba(253, 126, 20, 0.1)',
                 tension: 0.4,
@@ -512,22 +551,69 @@ document.addEventListener('DOMContentLoaded', function() {
         },
         options: chartOptions
     });
+
+    // Disk Read Chart
+    const diskReadCtx = document.getElementById('diskReadChart').getContext('2d');
+    new Chart(diskReadCtx, {
+        type: 'line',
+        data: {
+            labels: chartData.labels || [],
+            datasets: [{
+                label: 'Disk Read (KB/s)',
+                data: chartData.disk_read_rate || [],
+                borderColor: '#28a745',
+                backgroundColor: 'rgba(40, 167, 69, 0.1)',
+                tension: 0.4,
+                fill: true,
+                borderWidth: 2,
+                pointRadius: 3,
+                pointHoverRadius: 5
+            }]
+        },
+        options: chartOptions
+    });
+
+    // Disk Write Chart
+    const diskWriteCtx = document.getElementById('diskWriteChart').getContext('2d');
+    new Chart(diskWriteCtx, {
+        type: 'line',
+        data: {
+            labels: chartData.labels || [],
+            datasets: [{
+                label: 'Disk Write (KB/s)',
+                data: chartData.disk_write_rate || [],
+                borderColor: '#dc3545',
+                backgroundColor: 'rgba(220, 53, 69, 0.1)',
+                tension: 0.4,
+                fill: true,
+                borderWidth: 2,
+                pointRadius: 3,
+                pointHoverRadius: 5
+            }]
+        },
+        options: chartOptions
+    });
 });
 
-// Change time window
+// Change time window (use period= to match backend)
 function changeTimeWindow() {
-    const window = document.getElementById('windowSelect').value;
-    window.location.href = '?window=' + window;
+    const period = document.getElementById('periodSelect').value;
+    window.location.href = '?period=' + encodeURIComponent(period);
 }
 
-// Refresh data
+// Refresh data (keep current period and page)
 function refreshData() {
-    location.reload();
+    const params = new URLSearchParams(window.location.search);
+    window.location.href = window.location.pathname + '?' + params.toString();
 }
 
-// Export data
+// Export history as CSV (server-side route returns file download)
 function exportData() {
-    alert('Export functionality would download the current history data as CSV/JSON');
+    var period = '{{ time_window }}';
+    var sel = document.getElementById('periodSelect');
+    if (sel && sel.value) period = sel.value;
+    var url = '/history/{{ server.id }}/export?period=' + encodeURIComponent(period);
+    window.location.href = url;
 }
 </script>
 {% endblock %}

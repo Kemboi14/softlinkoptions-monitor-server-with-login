@@ -16,9 +16,8 @@ async fn main() -> std::io::Result<()> {
     dotenv().ok();
     tracing_subscriber::fmt::init();
 
-    // Get database URL from env or fallback
-    let database_url = env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite::memory:".to_string());
-    info!("Connecting to database: {}", database_url);
+    let database_url = env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:./monitor.db".to_string());
+    info!("Connecting to database");
 
     // Connect to database
     let pool: SqlitePool = SqlitePool::connect(&database_url)
@@ -64,8 +63,13 @@ async fn main() -> std::io::Result<()> {
             .service(routes::dashboard)
             .service(routes::servers_list)
             .service(routes::add_server)
+            .service(routes::edit_server_page)
+            .service(routes::edit_server)
             .service(routes::remove_server)
+            .service(routes::all_servers_history_page)
             .service(routes::server_history_page)
+            .service(routes::server_history_export)
+            .service(routes::dashboard_export)
             .service(routes::server_history_api)
             .service(routes::api_average)
             .wrap(Logger::default())

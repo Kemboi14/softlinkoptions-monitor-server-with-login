@@ -32,12 +32,6 @@ pub struct ServerStats {
     pub created_at: NaiveDateTime,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct NewServer {
-    pub name: String,
-    pub ip_address: String,
-}
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct NetdataResponse {
     pub labels: Vec<String>,
@@ -58,5 +52,9 @@ pub struct AverageStats {
     pub load_avg: f64,
     pub network_in: f64,
     pub network_out: f64,
+    /// Average network in rate (bytes/sec); display as KB/s with /1024
+    pub network_in_rate: f64,
+    /// Average network out rate (bytes/sec); display as KB/s with /1024
+    pub network_out_rate: f64,
     pub period: String,
 }

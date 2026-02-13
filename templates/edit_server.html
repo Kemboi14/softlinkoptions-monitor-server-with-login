@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Edit Server – {{ server.name }}{% endblock %}
+
+{% block content %}
+<div class="container py-4 fade-in">
+  <div class="row justify-content-center">
+    <div class="col-md-8 col-lg-6">
+      <div class="card border-0 shadow-lg">
+        <div class="card-header bg-gradient text-white" style="background: var(--primary-gradient);">
+          <h5 class="mb-0">
+            <i class="bi bi-pencil-square me-2"></i>
+            Edit Server
+          </h5>
+        </div>
+        <div class="card-body">
+          <form method="POST" action="/servers/{{ server.id }}/edit">
+            <div class="mb-3">
+              <label for="name" class="form-label fw-semibold">Server Name</label>
+              <input type="text" class="form-control" id="name" name="name" value="{{ server.name }}" required maxlength="255" placeholder="e.g. Web Server">
+            </div>
+            <div class="mb-3">
+              <label for="ip_address" class="form-label fw-semibold">IP Address</label>
+              <input type="text" class="form-control" id="ip_address" name="ip_address" value="{{ server.ip_address }}" required placeholder="e.g. 192.168.1.100">
+              <small class="text-muted">Target must have Netdata on port 19999</small>
+            </div>
+            <div class="d-flex gap-2">
+              <button type="submit" class="btn btn-primary">
+                <i class="bi bi-check-lg me-1"></i> Save
+              </button>
+              <a href="/" class="btn btn-outline-secondary">Cancel</a>
+              <a href="/history/{{ server.id }}" class="btn btn-outline-info ms-auto">
+                <i class="bi bi-clock-history me-1"></i> View History
+              </a>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
