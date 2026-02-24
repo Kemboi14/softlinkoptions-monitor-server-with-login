@@ -195,6 +195,7 @@
 <body>
 
 <!-- Navbar -->
+{% block navbar %}
 <nav class="navbar navbar-dark navbar-expand-lg mb-4">
   <div class="container d-flex align-items-center">
     <a class="navbar-brand d-flex align-items-center" href="/">
@@ -208,12 +209,16 @@
       <a href="/history" class="btn btn-outline-light btn-sm">
         <i class="bi bi-clock-history me-1"></i> All History
       </a>
+      <a href="/logout" class="btn btn-outline-danger btn-sm">
+        <i class="bi bi-box-arrow-right me-1"></i> Logout
+      </a>
       <span class="badge bg-success">
         <i class="bi bi-circle-fill me-1"></i> System Online
       </span>
     </div>
   </div>
 </nav>
+{% endblock %}
 
 <!-- Flash Messages -->
 <div class="container">

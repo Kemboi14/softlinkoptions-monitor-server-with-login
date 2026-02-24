@@ -9,6 +9,12 @@ use uuid::Uuid;
 use tracing::error;
 
 #[derive(Deserialize)]
+struct LoginCredentials {
+    username: String,
+    password: String,
+}
+
+#[derive(Deserialize)]
 struct ServerQuery {
     period: Option<String>,
     page: Option<u32>,
@@ -36,6 +42,19 @@ pub async fn dashboard(
     query: Query<DashboardQuery>,
     req: actix_web::HttpRequest,
 ) -> impl Responder {
+    // Simple authentication check - in production, use proper session management
+    let auth_header = req.headers().get("cookie");
+    let is_authenticated = auth_header
+        .and_then(|cookie| cookie.to_str().ok())
+        .map(|cookie_str| cookie_str.contains("authenticated=true"))
+        .unwrap_or(false);
+    
+    if !is_authenticated {
+        return HttpResponse::Found()
+            .append_header(("Location", "/login"))
+            .finish();
+    }
+    
     let page = query.page.unwrap_or(1);
     let limit = query.limit.unwrap_or(50).min(100); // Max 100 per page
     let offset = (page - 1) * limit;
@@ -933,4 +952,55 @@ async fn get_average_stats(
         network_out_rate: result.network_out_rate.unwrap_or(0.0),
         period: period.to_string(),
     })
+}
+
+#[get("/login")]
+pub async fn login_page(
+    tera: web::Data<Tera>,
+) -> impl Responder {
+    let mut context = Context::new();
+    
+    HttpResponse::Ok()
+        .content_type("text/html")
+        .body(tera.render("login.html", &context).unwrap_or_else(|_| {
+            "Template error".to_string()
+        }))
+}
+
+#[post("/login")]
+pub async fn login(
+    credentials: web::Form<LoginCredentials>,
+) -> impl Responder {
+    // Authentication with specified credentials
+    if credentials.username == "servers" && credentials.password == "Soft@26*" {
+        let flash_message = FlashMessage {
+            message: "Login successful!".to_string(),
+            type_: "success".to_string(),
+        };
+        
+        return HttpResponse::Found()
+            .append_header(("Location", "/"))
+            .append_header(("Set-Cookie", format!("flash_message={}:success; Path=/; HttpOnly", flash_message.message)))
+            .append_header(("Set-Cookie", "authenticated=true; Path=/; HttpOnly"))
+            .finish();
+    }
+    
+    let flash_message = FlashMessage {
+        message: "Invalid username or password".to_string(),
+        type_: "danger".to_string(),
+    };
+    
+    HttpResponse::Found()
+        .append_header(("Location", "/login"))
+        .append_header(("Set-Cookie", format!("flash_message={}:danger; Path=/; HttpOnly", flash_message.message)))
+        .finish()
+}
+
+#[get("/logout")]
+pub async fn logout() -> impl Responder {
+    HttpResponse::Found()
+        .append_header(("Location", "/login"))
+        .append_header(("Set-Cookie", "authenticated=; Max-Age=0; Path=/"))
+        .append_header(("Set-Cookie", "flash_message=; Max-Age=0; Path=/"))
+        .finish()
 }

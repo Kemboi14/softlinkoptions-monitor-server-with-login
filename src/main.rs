@@ -24,11 +24,11 @@ async fn main() -> std::io::Result<()> {
         .await
         .expect("Failed to connect to database");
 
-    // Run migrations
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
+    // Skip migrations for now (database already set up)
+    // sqlx::migrate!("./migrations")
+    //     .run(&pool)
+    //     .await
+    //     .expect("Failed to run migrations");
 
     // Read server config from environment
     let port: u16 = env::var("SERVER_PORT")
@@ -61,6 +61,9 @@ async fn main() -> std::io::Result<()> {
             .app_data(Data::new(pool.clone()))
             .app_data(Data::new(tera.clone()))
             .service(routes::dashboard)
+            .service(routes::login_page)
+            .service(routes::login)
+            .service(routes::logout)
             .service(routes::servers_list)
             .service(routes::add_server)
             .service(routes::edit_server_page)
