@@ -22,6 +22,28 @@
     </div>
   </div>
 
+  <!-- Alerts Section -->
+  <div id="alerts-section" class="mb-4" style="display: none;">
+    <div class="card border-0 shadow-sm">
+      <div class="card-header bg-white border-bottom">
+        <div class="d-flex justify-content-between align-items-center">
+          <h5 class="mb-0 fw-bold">
+            <i class="bi bi-exclamation-triangle me-2"></i>
+            Active Alerts
+          </h5>
+          <button class="btn btn-sm btn-outline-secondary" onclick="refreshAlerts()">
+            <i class="bi bi-arrow-clockwise me-1"></i> Refresh
+          </button>
+        </div>
+      </div>
+      <div class="card-body p-0">
+        <div id="alerts-container" class="p-3">
+          <!-- Alerts will be loaded here -->
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Stats Cards -->
   <div class="row mb-4 g-3">
     <div class="col-md-3 col-sm-6">
@@ -717,6 +739,133 @@ function confirmDeleteServer(serverId, serverName) {
         });
     }
 }
+
+// Alert management
+let alertData = [];
+
+async function loadAlerts() {
+    try {
+        const response = await fetch('/api/alerts/with-servers');
+        const alerts = await response.json();
+        alertData = alerts;
+        displayAlerts(alerts);
+        updateSystemStatus(alerts);
+    } catch (error) {
+        console.error('Failed to load alerts:', error);
+    }
+}
+
+function displayAlerts(alerts) {
+    const alertsSection = document.getElementById('alerts-section');
+    const alertsContainer = document.getElementById('alerts-container');
+    
+    if (alerts.length === 0) {
+        alertsSection.style.display = 'none';
+        return;
+    }
+    
+    alertsSection.style.display = 'block';
+    
+    const alertsHtml = alerts.map(alert => {
+        const alertClass = getAlertClass(alert.alert.alert_type);
+        const icon = getAlertIcon(alert.alert.alert_type);
+        const timeAgo = formatTimeAgo(new Date(alert.alert.created_at));
+        
+        return '<div class="alert ' + alertClass + ' alert-dismissible fade show mb-2" role="alert">' +
+            '<div class="d-flex align-items-start">' +
+                '<div class="me-3">' +
+                    '<i class="bi ' + icon + ' fs-5"></i>' +
+                '</div>' +
+                '<div class="flex-grow-1">' +
+                    '<div class="fw-bold">' + alert.alert.message + '</div>' +
+                    '<div class="small text-muted">' +
+                        'Server: ' + alert.server.name + ' (' + alert.server.ip_address + ') • ' + timeAgo +
+                    '</div>' +
+                    (alert.alert.current_value && alert.alert.threshold_value ? 
+                        '<div class="small mt-1">Current: ' + alert.alert.current_value + (alert.alert.metric_type === 'cpu' || alert.alert.metric_type === 'memory' || alert.alert.metric_type === 'disk' ? '%' : '') + ' / Threshold: ' + alert.alert.threshold_value + (alert.alert.metric_type === 'cpu' || alert.alert.metric_type === 'memory' || alert.alert.metric_type === 'disk' ? '%' : '') + '</div>' 
+                        : '') +
+                '</div>' +
+                '<button type="button" class="btn-close btn-close-sm" onclick="resolveAlert(\'' + alert.alert.id + '\')"></button>' +
+            '</div>' +
+        '</div>';
+    }).join('');
+    
+    alertsContainer.innerHTML = alertsHtml;
+}
+
+function getAlertClass(alertType) {
+    switch (alertType) {
+        case 'critical': return 'alert-danger';
+        case 'warning': return 'alert-warning';
+        case 'down': return 'alert-danger';
+        default: return 'alert-secondary';
+    }
+}
+
+function getAlertIcon(alertType) {
+    switch (alertType) {
+        case 'critical': return 'bi-exclamation-octagon-fill';
+        case 'warning': return 'bi-exclamation-triangle-fill';
+        case 'down': return 'bi-x-circle-fill';
+        default: return 'bi-info-circle-fill';
+    }
+}
+
+function formatTimeAgo(date) {
+    const now = new Date();
+    const diffInSeconds = Math.floor((now - date) / 1000);
+    
+    if (diffInSeconds < 60) return 'just now';
+    if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)} minutes ago`;
+    if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)} hours ago`;
+    return `${Math.floor(diffInSeconds / 86400)} days ago`;
+}
+
+async function resolveAlert(alertId) {
+    try {
+        const response = await fetch(`/api/alerts/${alertId}/resolve`, {
+            method: 'POST'
+        });
+        
+        if (response.ok) {
+            // Remove the alert from display
+            alertData = alertData.filter(alert => alert.alert.id !== alertId);
+            displayAlerts(alertData);
+            updateSystemStatus(alertData);
+        } else {
+            console.error('Failed to resolve alert');
+        }
+    } catch (error) {
+        console.error('Error resolving alert:', error);
+    }
+}
+
+function refreshAlerts() {
+    loadAlerts();
+}
+
+function updateSystemStatus(alerts) {
+    const statusElement = document.querySelector('.badge');
+    const criticalAlerts = alerts.filter(alert => alert.alert.alert_type === 'critical' || alert.alert.alert_type === 'down');
+    
+    if (criticalAlerts.length > 0) {
+        statusElement.className = 'badge bg-danger';
+        statusElement.innerHTML = '<i class="bi bi-activity me-1"></i> ' + criticalAlerts.length + ' Critical Issue' + (criticalAlerts.length > 1 ? 's' : '');
+    } else if (alerts.length > 0) {
+        statusElement.className = 'badge bg-warning';
+        statusElement.innerHTML = '<i class="bi bi-activity me-1"></i> ' + alerts.length + ' Warning' + (alerts.length > 1 ? 's' : '');
+    } else {
+        statusElement.className = 'badge bg-success';
+        statusElement.innerHTML = '<i class="bi bi-activity me-1"></i> All Systems Operational';
+    }
+}
+
+// Load alerts on page load
+document.addEventListener('DOMContentLoaded', function() {
+    loadAlerts();
+    // Refresh alerts every 30 seconds
+    setInterval(loadAlerts, 30000);
+});
 
 // Auto refresh every 30 seconds to pick up new metrics from the server
 setInterval(function() { location.reload(); }, 30000);

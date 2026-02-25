@@ -5,10 +5,10 @@ use reqwest::Client;
 use serde_json::Value as JsonValue;
 use sqlx::SqlitePool;
 use thiserror::Error;
-use tracing::info;
+use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::models::{ServerStats, NetdataResponse};
+use crate::models::{ServerStats, NetdataResponse, Alert, AlertPreference};
 
 const MIN_DISK_USAGE_PERCENT: f64 = 0.0;
 const DEFAULT_DISK_USAGE_PERCENT: f64 = 0.0;
@@ -35,7 +35,7 @@ impl MetricsService {
     pub fn new(pool: SqlitePool) -> Self {
         Self {
             client: Client::builder()
-                .timeout(Duration::from_secs(10))
+                .timeout(Duration::from_secs(60))
                 .build()
                 .expect("Failed to build HTTP client"),
             pool,
@@ -49,6 +49,10 @@ impl MetricsService {
         };
 
         let stats = self.fetch_metrics(ip).await?;
+        
+        // Check for alerts after collecting metrics
+        self.check_and_create_alerts(&stats, id).await?;
+        
         self.save_stats(stats, id).await
     }
 
@@ -82,67 +86,192 @@ impl MetricsService {
             Ok(json)
         }
 
-        // CPU: try to derive using 'idle' dimension where possible
-        let cpu_candidates = ["system.cpu", "system.cpu_all", "system.cpu0"];
+        // Discover available charts from Netdata
+        async fn discover_charts(client: &Client, url: &str) -> Result<Vec<String>, MetricsError> {
+            match get_json(client, url, "api/v1/charts").await {
+                Ok(charts_json) => {
+                    // Charts are nested under "charts" object
+                    if let Some(charts_obj) = charts_json.get("charts").and_then(|c| c.as_object()) {
+                        let chart_names: Vec<String> = charts_obj.keys()
+                            .map(|s| s.to_string())
+                            .collect();
+                        info!("Successfully discovered {} charts from Netdata", chart_names.len());
+                        return Ok(chart_names);
+                    }
+                    // Fallback: try direct array if structure is different
+                    else if let Some(charts) = charts_json.get("charts").and_then(|c| c.as_array()) {
+                        let chart_names: Vec<String> = charts.iter()
+                            .filter_map(|chart| chart.get("id").and_then(|id| id.as_str()))
+                            .map(|s| s.to_string())
+                            .collect();
+                        info!("Successfully discovered {} charts from Netdata (array format)", chart_names.len());
+                        return Ok(chart_names);
+                    } else {
+                        warn!("Unexpected charts response structure from Netdata");
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to discover charts from Netdata: {}", e);
+                }
+            }
+            Ok(vec![])
+        }
+
+        // Discover available charts for better fallback logic
+        let available_charts = discover_charts(&self.client, &base).await.unwrap_or_default();
+        if !available_charts.is_empty() {
+            info!("Available charts: {} charts found", available_charts.len());
+        } else {
+            info!("Chart discovery failed, using fallback candidates");
+        }
+
+        // Helper function to check if a chart should be tried
+        let should_try_chart = |chart_name: &str| -> bool {
+            if available_charts.is_empty() {
+                return true; // If discovery failed, try all candidates
+            }
+            
+            // Exact match first
+            if available_charts.contains(&chart_name.to_string()) {
+                return true;
+            }
+            
+            // Then try substring matches with word boundaries to avoid false positives
+            available_charts.iter().any(|available| {
+                // Check if the candidate is a substring of available chart
+                // but ensure it matches whole chart segments (separated by dots)
+                available.split('.').any(|segment| segment.contains(chart_name)) ||
+                // Or if the available chart contains the candidate as a whole segment
+                chart_name.split('.').any(|segment| available.contains(segment))
+            })
+        };
+
+        // CPU: expanded candidates for better detection
+        let cpu_candidates = [
+            "system.cpu",
+            "system.cpu_all",
+            "system.cpu0",
+            "system.cpu_percentage",
+            "system.cpu_usage",
+            "cpu.cpu",
+            "cpu.total",
+            "netdata.cpu",
+            "system.cpu_average"
+        ];
         let mut cpu_usage = None;
         for c in cpu_candidates {
-            if let Ok(chart) = get_chart(&self.client, &base, c).await {
-                cpu_usage = Some(parse_cpu(&chart));
-                if cpu_usage.is_some() { break; }
+            if should_try_chart(c) {
+                if let Ok(chart) = get_chart(&self.client, &base, c).await {
+                    cpu_usage = Some(parse_cpu(&chart));
+                    if cpu_usage.is_some() { break; }
+                }
             }
         }
 
         // Fetch info JSON once for authoritative totals (ram, disk) and uptime
         let info_json = get_json(&self.client, &base, "api/v1/info").await.ok();
 
-        // Memory: find used and total
-        let mem_candidates = ["system.ram", "system.ram_size", "system.memory"];
+        // Memory: expanded candidates for better detection
+        let mem_candidates = [
+            "system.ram",
+            "system.ram_size",
+            "system.memory",
+            "system.mem",
+            "mem.ram",
+            "memory.ram",
+            "netdata.ram",
+            "system.physmem",
+            "system.physical_memory"
+        ];
         let mut memory_usage: f64 = 0.0;
         let mut memory_total_gb = 0.0;
         for c in mem_candidates {
-            if let Ok(chart) = get_chart(&self.client, &base, c).await {
-                let (usage, total) = parse_memory(&chart, info_json.as_ref());
-                memory_usage = usage;
-                memory_total_gb = total;
-                break;
+            if should_try_chart(c) {
+                if let Ok(chart) = get_chart(&self.client, &base, c).await {
+                    let (usage, total) = parse_memory(&chart, info_json.as_ref());
+                    memory_usage = usage;
+                    memory_total_gb = total;
+                    break;
+                }
             }
         }
 
-        // Disk: try to read root mount usage (Netdata: disk_space._ for root, or disk_space./)
+        // Disk: expanded candidates for better cross-server compatibility
         let disk_candidates = [
             "disk_space._",
             "disk_space._root",
             "disk_space./",
             "disk_space./root",
             "disk_space._root_",
+            "disk_space.rootfs",
+            "disk_space./dev",
+            "disk_space./home",
+            "disk_space./var",
+            "disk_space./usr",
+            "disk_space./tmp",
             "system.disk",
             "disk.space._",
             "disk_util._",
             "disk_util._root",
             "disk_util./",
+            "disk_util.rootfs",
+            "disk.usage._",
+            "disk.usage./",
+            "disk.mounts._",
+            "disk.mounts./",
+            "filesystem._",
+            "filesystem./",
+            "vfs._",
+            "vfs./"
         ];
         let mut disk_usage_percent: f64 = 0.0;
+        let mut disk_found = false;
         for c in disk_candidates {
-            if let Ok(chart) = get_chart(&self.client, &base, c).await {
-                let pct = parse_disk(&chart);
-                if pct > 0.0 && pct <= 100.0 {
-                    disk_usage_percent = pct;
-                    break;
+            if should_try_chart(c) {
+                if let Ok(chart) = get_chart(&self.client, &base, c).await {
+                    let pct = parse_disk(&chart);
+                    if pct > 0.0 && pct <= 100.0 {
+                        disk_usage_percent = pct;
+                        disk_found = true;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // If no disk usage found, try to get from info endpoint
+        if !disk_found {
+            if let Some(ref info) = info_json {
+                if let (Some(used), Some(total)) = (
+                    info.get("disk_used").and_then(json_to_f64),
+                    info.get("disk_total").and_then(json_to_f64)
+                ) {
+                    disk_usage_percent = compute_percent(used, total);
                 }
             }
         }
 
-        // Uptime: first try common uptime charts, then /api/v1/info as fallback
+        // Uptime: expanded candidates
         let mut uptime_secs = 0i64;
-        let uptime_candidates = ["system.uptime", "uptime", "system.uptime_seconds"];
+        let uptime_candidates = [
+            "system.uptime",
+            "uptime",
+            "system.uptime_seconds",
+            "system.uptime_timestamp",
+            "netdata.uptime",
+            "proc.uptime",
+            "system.boot_time"
+        ];
         for uc in uptime_candidates {
-            if let Ok(chart) = get_chart(&self.client, &base, uc).await {
-                if let Some(row) = chart.data.get(0) {
-                    for (i, lbl) in chart.labels.iter().enumerate().skip(1) {
-                        if let Some(v) = row.get(i).and_then(|val: &JsonValue| json_to_f64(val)) {
-                            if lbl.to_lowercase().contains("uptime") {
-                                uptime_secs = v as i64;
-                                break;
+            if should_try_chart(uc) {
+                if let Ok(chart) = get_chart(&self.client, &base, uc).await {
+                    if let Some(row) = chart.data.get(0) {
+                        for (i, lbl) in chart.labels.iter().enumerate().skip(1) {
+                            if let Some(v) = row.get(i).and_then(|val: &JsonValue| json_to_f64(val)) {
+                                if lbl.to_lowercase().contains("uptime") {
+                                    uptime_secs = v as i64;
+                                    break;
+                                }
                             }
                         }
                     }
@@ -151,45 +280,87 @@ impl MetricsService {
             if uptime_secs > 0 { break; }
         }
         
-        // Fallback: calculate uptime based on monitoring start time if Netdata fails
+        // Fallback: use system boot time from info endpoint or reasonable estimate
         if uptime_secs == 0 {
-            // This is a more reliable uptime for our monitoring session
-            // You could store a start time in database or use the first record timestamp
-            // For now, we'll use a reasonable estimate based on current date
-            use chrono::{Utc, Duration};
-            let now = Utc::now();
-            // Assume monitoring started around first of month (more realistic)
-            let estimated_start = now - Duration::days(26); // Approximate based on your observation
-            uptime_secs = (now - estimated_start).num_seconds();
+            if let Some(ref info) = info_json {
+                // Try to get boot time from info endpoint
+                if let Some(boot_time) = info.get("system_boot_time").and_then(json_to_f64) {
+                    let now = Utc::now().timestamp() as f64;
+                    uptime_secs = (now - boot_time) as i64;
+                } else if let Some(start_time) = info.get("netdata_start_time").and_then(json_to_f64) {
+                    let now = Utc::now().timestamp() as f64;
+                    uptime_secs = (now - start_time) as i64;
+                }
+            }
+            
+            // Final fallback: use current time minus a reasonable monitoring start time
+            if uptime_secs == 0 {
+                use chrono::{Utc, Duration};
+                let now = Utc::now();
+                // Assume monitoring started recently (last 24 hours) - more realistic than 26 days
+                let estimated_start = now - Duration::hours(12);
+                uptime_secs = (now - estimated_start).num_seconds();
+                info!("Using estimated uptime: {} seconds", uptime_secs);
+            }
         }
 
-        // Load average
+        // Load average: expanded candidates
         let mut load_avg = 0.0f64;
-        if let Ok(chart) = get_chart(&self.client, &base, "system.load").await {
-            if let Some(row) = chart.data.get(0) {
-                for (i, lbl) in chart.labels.iter().enumerate().skip(1) {
-                    if lbl.to_lowercase().contains("load1") || lbl.to_lowercase().contains("1m") {
-                        if let Some(v) = row.get(i).and_then(|val: &JsonValue| json_to_f64(val)) {
-                            load_avg = v;
-                            break;
+        let load_candidates = [
+            "system.load",
+            "load.load",
+            "system.loadavg",
+            "netdata.load",
+            "proc.loadavg",
+            "system.system_load"
+        ];
+        for lc in load_candidates {
+            if should_try_chart(lc) {
+                if let Ok(chart) = get_chart(&self.client, &base, lc).await {
+                    if let Some(row) = chart.data.get(0) {
+                        for (i, lbl) in chart.labels.iter().enumerate().skip(1) {
+                            let label = lbl.to_lowercase();
+                            if label.contains("load1") || label.contains("1m") || label.contains("load") {
+                                if let Some(v) = row.get(i).and_then(|val: &JsonValue| json_to_f64(val)) {
+                                    load_avg = v;
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
             }
+            if load_avg > 0.0 { break; }
         }
 
-        // Logged users
+        // Logged users - expanded chart candidates and better detection
         let mut logged_users = 0i64;
-        if let Ok(chart) = get_chart(&self.client, &base, "system.users").await {
-            if let Some(row) = chart.data.get(0) {
-                for (i, lbl) in chart.labels.iter().enumerate().skip(1) {
-                    if lbl.to_lowercase().contains("users") {
-                        if let Some(v) = row.get(i).and_then(|val: &JsonValue| json_to_f64(val)) {
-                            logged_users = v as i64;
-                            break;
+        let user_candidates = [
+            "system.users",
+            "users",
+            "system.users_count",
+            "system.active_users",
+            "system.logged_users",
+            "netdata.users",
+            "proc.numusers",
+            "proc.users"
+        ];
+        for uc in user_candidates {
+            if should_try_chart(uc) {
+                if let Ok(chart) = get_chart(&self.client, &base, uc).await {
+                    if let Some(row) = chart.data.get(0) {
+                        for (i, lbl) in chart.labels.iter().enumerate().skip(1) {
+                            let label = lbl.to_lowercase();
+                            if label.contains("users") || label.contains("sessions") || label.contains("logged") {
+                                if let Some(v) = row.get(i).and_then(|val: &JsonValue| json_to_f64(val)) {
+                                    logged_users = v as i64;
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
+                if logged_users > 0 { break; }
             }
         }
 
@@ -208,10 +379,12 @@ impl MetricsService {
             "net.lo",
         ];
         for net_chart in net_candidates {
-            if let Ok(chart) = get_chart(&self.client, &base, net_chart).await {
-                let (in_r, out_r) = parse_network_rates(&chart);
-                net_in_rate += in_r;
-                net_out_rate += out_r;
+            if should_try_chart(net_chart) {
+                if let Ok(chart) = get_chart(&self.client, &base, net_chart).await {
+                    let (in_r, out_r) = parse_network_rates(&chart);
+                    net_in_rate += in_r;
+                    net_out_rate += out_r;
+                }
             }
         }
 
@@ -219,12 +392,14 @@ impl MetricsService {
         let (mut disk_read_rate, mut disk_write_rate) = (0.0f64, 0.0f64);
         let disk_io_candidates = ["disk_io._total", "disk_io.sda", "disk_io.nvme0n1", "disk.io", "system.io"];
         for disk_io_chart in disk_io_candidates {
-            if let Ok(chart) = get_chart(&self.client, &base, disk_io_chart).await {
-                let (r, w) = parse_disk_io_rates(&chart);
-                if r > 0.0 || w > 0.0 {
-                    disk_read_rate = r;
-                    disk_write_rate = w;
-                    break;
+            if should_try_chart(disk_io_chart) {
+                if let Ok(chart) = get_chart(&self.client, &base, disk_io_chart).await {
+                    let (r, w) = parse_disk_io_rates(&chart);
+                    if r > 0.0 || w > 0.0 {
+                        disk_read_rate = r;
+                        disk_write_rate = w;
+                        break;
+                    }
                 }
             }
         }
@@ -232,6 +407,25 @@ impl MetricsService {
         let cpu_final = cpu_usage.unwrap_or(0.0).clamp(0.0, 100.0);
         let mem_final = memory_usage.clamp(0.0, 100.0);
         let disk_final = disk_usage_percent.clamp(0.0, 100.0);
+        
+        // Validate parsed metrics to ensure reasonable values
+        let load_final = if load_avg.is_nan() || load_avg.is_infinite() || load_avg < 0.0 {
+            0.0
+        } else {
+            load_avg
+        };
+        
+        let users_final = if logged_users < 0 || logged_users > 1000 {
+            0 // Reasonable upper bound for logged users
+        } else {
+            logged_users
+        };
+        
+        let uptime_final = if uptime_secs < 0 || uptime_secs > (365 * 24 * 60 * 60) {
+            0 // Max 1 year uptime
+        } else {
+            uptime_secs
+        };
         
         info!("Final metrics for {}: CPU={:.1}%, MEM={:.1}%, DISK={:.1}%", 
                server_ip, cpu_final, mem_final, disk_final);
@@ -243,15 +437,15 @@ impl MetricsService {
             memory_usage: mem_final,
             memory_total: memory_total_gb,
             disk_usage: disk_final,
-            load_avg,
-            logged_users,
-            network_in: 0.0,
-            network_out: 0.0,
+            load_avg: load_final,
+            logged_users: users_final,
+            network_in: net_in_rate, // Use actual network values instead of hardcoded zeros
+            network_out: net_out_rate,
             network_in_rate: net_in_rate,
             network_out_rate: net_out_rate,
             disk_read_rate: disk_read_rate,
             disk_write_rate: disk_write_rate,
-            uptime: uptime_secs,
+            uptime: uptime_final,
             created_at: Utc::now().naive_utc(),
         })
     }
@@ -291,6 +485,277 @@ impl MetricsService {
 
         Ok(())
     }
+
+    /// Check metrics against thresholds and create alerts if necessary
+    pub async fn check_and_create_alerts(&self, stats: &ServerStats, server_id: &str) -> Result<(), MetricsError> {
+        // Get default alert preferences (for now, we'll use defaults)
+        let preferences = self.get_default_alert_preferences().await?;
+        
+        // Check server down condition (no recent metrics)
+        self.check_server_down_alert(server_id).await?;
+        
+        // Check CPU usage
+        if stats.cpu_usage > preferences.cpu_threshold {
+            let alert_type = if stats.cpu_usage > 95.0 { "critical" } else { "warning" };
+            self.create_alert_if_not_exists(
+                server_id,
+                alert_type,
+                "cpu",
+                format!("CPU usage is {:.1}%", stats.cpu_usage),
+                Some(stats.cpu_usage),
+                Some(preferences.cpu_threshold),
+            ).await?;
+        }
+        
+        // Check memory usage
+        if stats.memory_usage > preferences.memory_threshold {
+            let alert_type = if stats.memory_usage > 95.0 { "critical" } else { "warning" };
+            self.create_alert_if_not_exists(
+                server_id,
+                alert_type,
+                "memory",
+                format!("Memory usage is {:.1}%", stats.memory_usage),
+                Some(stats.memory_usage),
+                Some(preferences.memory_threshold),
+            ).await?;
+        }
+        
+        // Check disk usage
+        if stats.disk_usage > preferences.disk_threshold {
+            let alert_type = if stats.disk_usage > 98.0 { "critical" } else { "warning" };
+            self.create_alert_if_not_exists(
+                server_id,
+                alert_type,
+                "disk",
+                format!("Disk usage is {:.1}%", stats.disk_usage),
+                Some(stats.disk_usage),
+                Some(preferences.disk_threshold),
+            ).await?;
+        }
+        
+        // Check load average
+        if stats.load_avg > preferences.load_threshold {
+            let alert_type = if stats.load_avg > 20.0 { "critical" } else { "warning" };
+            self.create_alert_if_not_exists(
+                server_id,
+                alert_type,
+                "load",
+                format!("Load average is {:.2}", stats.load_avg),
+                Some(stats.load_avg),
+                Some(preferences.load_threshold),
+            ).await?;
+        }
+        
+        Ok(())
+    }
+    
+    /// Check if server is down (no recent metrics)
+    async fn check_server_down_alert(&self, server_id: &str) -> Result<(), MetricsError> {
+        let five_minutes_ago = Utc::now().naive_utc() - chrono::Duration::minutes(5);
+        
+        let recent_count = sqlx::query_scalar!(
+            "SELECT COUNT(*) as count FROM server_stats WHERE server_id = ? AND created_at > ?",
+            server_id,
+            five_minutes_ago
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        
+        let count: i64 = recent_count as i64;
+        
+        if count == 0 {
+            self.create_alert_if_not_exists(
+                server_id,
+                "critical",
+                "server_down",
+                "Server is down or not responding".to_string(),
+                None,
+                None,
+            ).await?;
+        } else {
+            // Resolve any existing server down alerts
+            self.resolve_alerts_by_type(server_id, "server_down").await?;
+        }
+        
+        Ok(())
+    }
+    
+    /// Create alert if one of the same type and metric doesn't already exist and is unresolved
+    async fn create_alert_if_not_exists(
+        &self,
+        server_id: &str,
+        alert_type: &str,
+        metric_type: &str,
+        message: String,
+        current_value: Option<f64>,
+        threshold_value: Option<f64>,
+    ) -> Result<(), MetricsError> {
+        // Check if unresolved alert of this type already exists
+        let existing = sqlx::query_scalar!(
+            "SELECT COUNT(*) as count FROM alerts 
+             WHERE server_id = ? AND alert_type = ? AND metric_type = ? AND is_resolved = FALSE",
+            server_id,
+            alert_type,
+            metric_type
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        
+        let count: i64 = existing as i64;
+        
+        if count == 0 {
+            // Create new alert
+            let alert_id = Uuid::new_v4().to_string();
+            let now = Utc::now().naive_utc();
+            
+            sqlx::query!(
+                r#"
+                INSERT INTO alerts (
+                    id, server_id, alert_type, metric_type, message,
+                    current_value, threshold_value, is_resolved, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                "#,
+                alert_id,
+                server_id,
+                alert_type,
+                metric_type,
+                message,
+                current_value,
+                threshold_value,
+                false,
+                now
+            )
+            .execute(&self.pool)
+            .await?;
+            
+            warn!("🚨 Alert created: {} - {} (Server: {})", alert_type, message, server_id);
+        }
+        
+        Ok(())
+    }
+    
+    /// Resolve alerts by type for a server
+    async fn resolve_alerts_by_type(&self, server_id: &str, metric_type: &str) -> Result<(), MetricsError> {
+        let now = Utc::now().naive_utc();
+        
+        sqlx::query!(
+            "UPDATE alerts SET is_resolved = TRUE, resolved_at = ? 
+             WHERE server_id = ? AND metric_type = ? AND is_resolved = FALSE",
+            now,
+            server_id,
+            metric_type
+        )
+        .execute(&self.pool)
+        .await?;
+        
+        Ok(())
+    }
+    
+    /// Get default alert preferences
+    async fn get_default_alert_preferences(&self) -> Result<AlertPreference, MetricsError> {
+        let user_id = "default"; // We'll use a default user for now
+        
+        // Try to get existing preferences
+        if let Some(prefs) = sqlx::query_as!(
+            AlertPreference,
+            r#"SELECT id as "id!", user_id as "user_id!", cpu_threshold as "cpu_threshold!", 
+               memory_threshold as "memory_threshold!", disk_threshold as "disk_threshold!",
+               load_threshold as "load_threshold!", enable_notifications as "enable_notifications!",
+               created_at as "created_at!", updated_at as "updated_at!"
+               FROM alert_preferences WHERE user_id = ?"#,
+            user_id
+        )
+        .fetch_optional(&self.pool)
+        .await? {
+            return Ok(prefs);
+        }
+        
+        // Create default preferences
+        let prefs_id = Uuid::new_v4().to_string();
+        let now = Utc::now().naive_utc();
+        
+        let preferences = AlertPreference {
+            id: prefs_id.clone(),
+            user_id: user_id.to_string(),
+            cpu_threshold: 80.0,
+            memory_threshold: 85.0,
+            disk_threshold: 90.0,
+            load_threshold: 10.0,
+            enable_notifications: true,
+            created_at: now,
+            updated_at: now,
+        };
+        
+        sqlx::query!(
+            r#"
+            INSERT INTO alert_preferences (
+                id, user_id, cpu_threshold, memory_threshold, disk_threshold,
+                load_threshold, enable_notifications, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+            preferences.id,
+            preferences.user_id,
+            preferences.cpu_threshold,
+            preferences.memory_threshold,
+            preferences.disk_threshold,
+            preferences.load_threshold,
+            preferences.enable_notifications,
+            preferences.created_at,
+            preferences.updated_at
+        )
+        .execute(&self.pool)
+        .await?;
+        
+        Ok(preferences)
+    }
+    
+    /// Get unresolved alerts for a server
+    pub async fn get_unresolved_alerts(&self, server_id: Option<&str>) -> Result<Vec<Alert>, MetricsError> {
+        let alerts = if let Some(sid) = server_id {
+            sqlx::query_as!(
+                Alert,
+                r#"SELECT id as "id!", server_id as "server_id!", alert_type as "alert_type!", 
+                   metric_type as "metric_type!", message as "message!", current_value, threshold_value,
+                   is_resolved as "is_resolved!", created_at as "created_at!", resolved_at
+                   FROM alerts WHERE server_id = ? AND is_resolved = FALSE ORDER BY created_at DESC"#,
+                sid
+            )
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query_as!(
+                Alert,
+                r#"SELECT id as "id!", server_id as "server_id!", alert_type as "alert_type!", 
+                   metric_type as "metric_type!", message as "message!", current_value, threshold_value,
+                   is_resolved as "is_resolved!", created_at as "created_at!", resolved_at
+                   FROM alerts WHERE is_resolved = FALSE ORDER BY created_at DESC"#
+            )
+            .fetch_all(&self.pool)
+            .await?
+        };
+        
+        Ok(alerts)
+    }
+    
+    /// Get alert summary
+    pub async fn get_alert_summary(&self) -> Result<crate::models::AlertSummary, MetricsError> {
+        let summary = sqlx::query_as!(
+            crate::models::AlertSummary,
+            r#"
+            SELECT 
+                COUNT(*) as "total_alerts!",
+                SUM(CASE WHEN alert_type = 'critical' THEN 1 ELSE 0 END) as "critical_alerts!",
+                SUM(CASE WHEN alert_type = 'warning' THEN 1 ELSE 0 END) as "warning_alerts!",
+                SUM(CASE WHEN alert_type = 'down' THEN 1 ELSE 0 END) as "down_alerts!",
+                SUM(CASE WHEN is_resolved = FALSE THEN 1 ELSE 0 END) as "unresolved_alerts!"
+            FROM alerts
+            "#
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        
+        Ok(summary)
+    }
 }
 
 /* =========================
@@ -322,7 +787,8 @@ fn compute_percent(used_bytes: f64, total_bytes: f64) -> f64 {
 
 /// Compute per-second rate (network, disk I/O)
 fn compute_rate(delta: f64, dt_seconds: f64) -> f64 {
-    if dt_seconds > 0.0 {
+    const MIN_DT: f64 = 1e-6; // Minimum time difference to avoid division by zero
+    if dt_seconds > MIN_DT {
         (delta / dt_seconds).max(0.0)
     } else {
         0.0
@@ -366,32 +832,66 @@ pub fn parse_disk(chart: &NetdataResponse) -> f64 {
         let mut used = 0.0;
         let mut total = 0.0;
         let mut avail = 0.0;
+        let mut free = 0.0;
         let mut percent_val = None;
 
         for (i, lbl) in chart.labels.iter().enumerate().skip(1) {
             if let Some(val) = row.get(i).and_then(|val: &JsonValue| json_to_f64(val)) {
                 let label: String = lbl.to_lowercase();
-                if label.contains("util") || label.contains("percent") || label.contains("usage") {
+                
+                // Direct percentage values
+                if label.contains("util") || label.contains("percent") || label.contains("usage") 
+                    || label.contains("%") || label.contains("pct") {
                     percent_val = Some(if val <= 1.0 { val * 100.0 } else { val });
-                } else if label.contains("used") {
+                }
+                // Used space
+                else if label.contains("used") || label.contains("consumed") {
                     used = val;
-                } else if label.contains("total") || label.contains("size") {
+                }
+                // Total space
+                else if label.contains("total") || label.contains("size") || label.contains("capacity") {
                     total = val;
-                } else if label.contains("avail") || label.contains("free") {
+                }
+                // Available/free space
+                else if label.contains("avail") || label.contains("available") {
                     avail = val;
+                }
+                else if label.contains("free") {
+                    free = val;
                 }
             }
         }
 
+        // Return direct percentage if found
         if let Some(p) = percent_val {
             return clamp_percent(p);
         }
 
+        // Calculate from used/total
         if total > 0.0 {
             return compute_percent(used, total);
         }
+        
+        // Calculate from used + avail
         if used > 0.0 && avail > 0.0 {
             return compute_percent(used, used + avail);
+        }
+        
+        // Calculate from used + free
+        if used > 0.0 && free > 0.0 {
+            return compute_percent(used, used + free);
+        }
+        
+        // Calculate from total - avail (if avail represents free space)
+        if total > 0.0 && avail > 0.0 {
+            let used_calculated = total - avail;
+            return compute_percent(used_calculated, total);
+        }
+        
+        // Calculate from total - free (if free represents free space)
+        if total > 0.0 && free > 0.0 {
+            let used_calculated = total - free;
+            return compute_percent(used_calculated, total);
         }
     }
     0.0

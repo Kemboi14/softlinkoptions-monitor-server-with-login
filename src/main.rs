@@ -37,7 +37,7 @@ async fn main() -> std::io::Result<()> {
         .expect("Invalid SERVER_PORT");
 
     let collection_interval: u64 = env::var("COLLECTION_INTERVAL")
-        .unwrap_or_else(|_| "30".to_string())
+        .unwrap_or_else(|_| "60".to_string())
         .parse()
         .expect("Invalid COLLECTION_INTERVAL");
 
@@ -75,6 +75,10 @@ async fn main() -> std::io::Result<()> {
             .service(routes::dashboard_export)
             .service(routes::server_history_api)
             .service(routes::api_average)
+            .service(routes::get_alerts)
+            .service(routes::get_alert_summary)
+            .service(routes::get_alerts_with_servers)
+            .service(routes::resolve_alert)
             .wrap(Logger::default())
     })
     .bind(("0.0.0.0", port))?

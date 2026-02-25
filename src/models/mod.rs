@@ -58,3 +58,45 @@ pub struct AverageStats {
     pub network_out_rate: f64,
     pub period: String,
 }
+
+#[derive(Debug, Serialize, Deserialize, FromRow, Clone)]
+pub struct Alert {
+    pub id: String,
+    pub server_id: String,
+    pub alert_type: String, // 'critical', 'warning', 'down'
+    pub metric_type: String, // 'cpu', 'memory', 'disk', 'server_down'
+    pub message: String,
+    pub current_value: Option<f64>,
+    pub threshold_value: Option<f64>,
+    pub is_resolved: bool,
+    pub created_at: NaiveDateTime,
+    pub resolved_at: Option<NaiveDateTime>,
+}
+
+#[derive(Debug, Serialize, Deserialize, FromRow)]
+pub struct AlertPreference {
+    pub id: String,
+    pub user_id: String,
+    pub cpu_threshold: f64,
+    pub memory_threshold: f64,
+    pub disk_threshold: f64,
+    pub load_threshold: f64,
+    pub enable_notifications: bool,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+}
+
+#[derive(Debug, Serialize, Deserialize, FromRow)]
+pub struct AlertSummary {
+    pub total_alerts: i64,
+    pub critical_alerts: i64,
+    pub warning_alerts: i64,
+    pub down_alerts: i64,
+    pub unresolved_alerts: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AlertWithServer {
+    pub alert: Alert,
+    pub server: Server,
+}

@@ -2,7 +2,8 @@ use actix_web::{get, post, delete, web, HttpResponse, Responder};
 use actix_web::web::Query;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
-use crate::models::{Server, ServerStats, ServerWithStats, AverageStats};
+use crate::models::{Server, ServerStats, ServerWithStats, AverageStats, Alert, AlertWithServer};
+use crate::services::MetricsService;
 use chrono::{Utc, Duration};
 use tera::{Tera, Context};
 use uuid::Uuid;
@@ -958,7 +959,7 @@ async fn get_average_stats(
 pub async fn login_page(
     tera: web::Data<Tera>,
 ) -> impl Responder {
-    let mut context = Context::new();
+    let context = Context::new();
     
     HttpResponse::Ok()
         .content_type("text/html")
@@ -1003,4 +1004,139 @@ pub async fn logout() -> impl Responder {
         .append_header(("Set-Cookie", "authenticated=; Max-Age=0; Path=/"))
         .append_header(("Set-Cookie", "flash_message=; Max-Age=0; Path=/"))
         .finish()
+}
+
+// =========================
+// ALERT ENDPOINTS
+// =========================
+
+#[get("/api/alerts")]
+pub async fn get_alerts(
+    pool: web::Data<SqlitePool>,
+    query: Query<AlertQuery>,
+) -> impl Responder {
+    let metrics_service = MetricsService::new(pool.as_ref().clone());
+    
+    match metrics_service.get_unresolved_alerts(query.server_id.as_deref()).await {
+        Ok(alerts) => HttpResponse::Ok().json(alerts),
+        Err(e) => {
+            error!("Failed to fetch alerts: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "Failed to fetch alerts"
+            }))
+        }
+    }
+}
+
+#[get("/api/alerts/summary")]
+pub async fn get_alert_summary(
+    pool: web::Data<SqlitePool>,
+) -> impl Responder {
+    let metrics_service = MetricsService::new(pool.as_ref().clone());
+    
+    match metrics_service.get_alert_summary().await {
+        Ok(summary) => HttpResponse::Ok().json(summary),
+        Err(e) => {
+            error!("Failed to fetch alert summary: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "Failed to fetch alert summary"
+            }))
+        }
+    }
+}
+
+#[get("/api/alerts/with-servers")]
+pub async fn get_alerts_with_servers(
+    pool: web::Data<SqlitePool>,
+) -> impl Responder {
+    match get_alerts_with_server_info(&pool).await {
+        Ok(alerts) => HttpResponse::Ok().json(alerts),
+        Err(e) => {
+            error!("Failed to fetch alerts with servers: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "Failed to fetch alerts with servers"
+            }))
+        }
+    }
+}
+
+#[post("/api/alerts/{id}/resolve")]
+pub async fn resolve_alert(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<String>,
+) -> impl Responder {
+    let alert_id = path.into_inner();
+    let now = Utc::now().naive_utc();
+    
+    match sqlx::query!(
+        "UPDATE alerts SET is_resolved = TRUE, resolved_at = ? WHERE id = ?",
+        now,
+        alert_id
+    )
+    .execute(pool.as_ref())
+    .await
+    {
+        Ok(result) => {
+            if result.rows_affected() > 0 {
+                HttpResponse::Ok().json(serde_json::json!({
+                    "success": true,
+                    "message": "Alert resolved successfully"
+                }))
+            } else {
+                HttpResponse::NotFound().json(serde_json::json!({
+                    "error": "Alert not found"
+                }))
+            }
+        }
+        Err(e) => {
+            error!("Failed to resolve alert: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "Failed to resolve alert"
+            }))
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct AlertQuery {
+    server_id: Option<String>,
+    resolved: Option<bool>,
+}
+
+async fn get_alerts_with_server_info(pool: &SqlitePool) -> Result<Vec<AlertWithServer>, sqlx::Error> {
+    let alerts = sqlx::query_as!(
+        Alert,
+        r#"SELECT id as "id!", server_id as "server_id!", alert_type as "alert_type!", 
+           metric_type as "metric_type!", message as "message!", current_value, threshold_value,
+           is_resolved as "is_resolved!", created_at as "created_at!", resolved_at
+           FROM alerts 
+           WHERE is_resolved = FALSE 
+           ORDER BY created_at DESC"#
+    )
+    .fetch_all(pool)
+    .await?;
+    
+    let mut result = Vec::new();
+    
+    for alert in alerts {
+        // Get server info for each alert
+        if let Some(server) = sqlx::query_as!(
+            Server,
+            r#"
+            SELECT id as "id!", name as "name!", ip_address as "ip_address!", created_at as "created_at!"
+            FROM servers WHERE id = ?
+            "#,
+            alert.server_id
+        )
+        .fetch_optional(pool)
+        .await?
+        {
+            result.push(AlertWithServer {
+                alert,
+                server,
+            });
+        }
+    }
+    
+    Ok(result)
 }
