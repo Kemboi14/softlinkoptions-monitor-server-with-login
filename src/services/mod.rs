@@ -86,13 +86,29 @@ impl MetricsService {
             Ok(json)
         }
 
-        // Discover available charts from Netdata
+        // Discover available charts from Netdata with size limits
         async fn discover_charts(client: &Client, url: &str) -> Result<Vec<String>, MetricsError> {
-            match get_json(client, url, "api/v1/charts").await {
+            // Create a client with shorter timeout for discovery
+            let discovery_client = Client::builder()
+                .timeout(Duration::from_secs(10)) // Shorter timeout for discovery
+                .build()
+                .map_err(|e| MetricsError::HttpError(e.into()))?;
+            
+            match get_json(&discovery_client, url, "api/v1/charts").await {
                 Ok(charts_json) => {
+                    // Limit response size to prevent memory exhaustion
+                    let charts_str = serde_json::to_string(&charts_json)
+                        .map_err(|_| MetricsError::SystemError("Failed to serialize charts".to_string()))?;
+                    
+                    if charts_str.len() > 1_000_000 { // 1MB limit
+                        warn!("Charts response too large, skipping discovery");
+                        return Ok(vec![]);
+                    }
+                    
                     // Charts are nested under "charts" object
                     if let Some(charts_obj) = charts_json.get("charts").and_then(|c| c.as_object()) {
                         let chart_names: Vec<String> = charts_obj.keys()
+                            .take(1000) // Limit number of charts
                             .map(|s| s.to_string())
                             .collect();
                         info!("Successfully discovered {} charts from Netdata", chart_names.len());
@@ -101,6 +117,7 @@ impl MetricsService {
                     // Fallback: try direct array if structure is different
                     else if let Some(charts) = charts_json.get("charts").and_then(|c| c.as_array()) {
                         let chart_names: Vec<String> = charts.iter()
+                            .take(1000) // Limit number of charts
                             .filter_map(|chart| chart.get("id").and_then(|id| id.as_str()))
                             .map(|s| s.to_string())
                             .collect();
@@ -590,44 +607,45 @@ impl MetricsService {
         current_value: Option<f64>,
         threshold_value: Option<f64>,
     ) -> Result<(), MetricsError> {
-        // Check if unresolved alert of this type already exists
-        let existing = sqlx::query_scalar!(
-            "SELECT COUNT(*) as count FROM alerts 
-             WHERE server_id = ? AND alert_type = ? AND metric_type = ? AND is_resolved = FALSE",
+        // Use INSERT with ON CONFLICT to prevent race conditions
+        let alert_id = Uuid::new_v4().to_string();
+        let now = Utc::now().naive_utc();
+        
+        sqlx::query!(
+            r#"
+            INSERT OR IGNORE INTO alerts (
+                id, server_id, alert_type, metric_type, message,
+                current_value, threshold_value, is_resolved, created_at
+            ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
+            WHERE NOT EXISTS (
+                SELECT 1 FROM alerts 
+                WHERE server_id = ? AND alert_type = ? AND metric_type = ? AND is_resolved = FALSE
+            )
+            "#,
+            alert_id,
+            server_id,
+            alert_type,
+            metric_type,
+            message,
+            current_value,
+            threshold_value,
+            false,
+            now,
             server_id,
             alert_type,
             metric_type
         )
+        .execute(&self.pool)
+        .await?;
+        
+        // Check if we actually inserted a new alert
+        let rows_affected = sqlx::query_scalar!(
+            "SELECT changes() as count"
+        )
         .fetch_one(&self.pool)
         .await?;
         
-        let count: i64 = existing as i64;
-        
-        if count == 0 {
-            // Create new alert
-            let alert_id = Uuid::new_v4().to_string();
-            let now = Utc::now().naive_utc();
-            
-            sqlx::query!(
-                r#"
-                INSERT INTO alerts (
-                    id, server_id, alert_type, metric_type, message,
-                    current_value, threshold_value, is_resolved, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                "#,
-                alert_id,
-                server_id,
-                alert_type,
-                metric_type,
-                message,
-                current_value,
-                threshold_value,
-                false,
-                now
-            )
-            .execute(&self.pool)
-            .await?;
-            
+        if rows_affected > 0 {
             warn!("🚨 Alert created: {} - {} (Server: {})", alert_type, message, server_id);
         }
         
@@ -746,7 +764,7 @@ impl MetricsService {
                 COUNT(*) as "total_alerts!",
                 SUM(CASE WHEN alert_type = 'critical' THEN 1 ELSE 0 END) as "critical_alerts!",
                 SUM(CASE WHEN alert_type = 'warning' THEN 1 ELSE 0 END) as "warning_alerts!",
-                SUM(CASE WHEN alert_type = 'down' THEN 1 ELSE 0 END) as "down_alerts!",
+                SUM(CASE WHEN metric_type = 'server_down' THEN 1 ELSE 0 END) as "down_alerts!",
                 SUM(CASE WHEN is_resolved = FALSE THEN 1 ELSE 0 END) as "unresolved_alerts!"
             FROM alerts
             "#

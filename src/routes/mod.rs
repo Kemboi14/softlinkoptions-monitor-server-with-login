@@ -1,4 +1,4 @@
-use actix_web::{get, post, delete, web, HttpResponse, Responder};
+use actix_web::{get, post, delete, web, HttpResponse, Responder, dev::forward};
 use actix_web::web::Query;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
@@ -8,6 +8,22 @@ use chrono::{Utc, Duration};
 use tera::{Tera, Context};
 use uuid::Uuid;
 use tracing::error;
+
+// Authentication middleware for API endpoints
+fn check_api_auth(req: &actix_web::HttpRequest) -> Result<(), HttpResponse> {
+    let auth_header = req.headers().get("cookie");
+    let is_authenticated = auth_header
+        .and_then(|cookie| cookie.to_str().ok())
+        .map(|cookie_str| cookie_str.contains("authenticated=true"))
+        .unwrap_or(false);
+    
+    if !is_authenticated {
+        return Err(HttpResponse::Unauthorized().json(serde_json::json!({
+            "error": "Authentication required"
+        }));
+    }
+    Ok(())
+}
 
 #[derive(Deserialize)]
 struct LoginCredentials {
@@ -972,8 +988,12 @@ pub async fn login_page(
 pub async fn login(
     credentials: web::Form<LoginCredentials>,
 ) -> impl Responder {
-    // Authentication with specified credentials
-    if credentials.username == "servers" && credentials.password == "Soft@26*" {
+    // Get credentials from environment variables
+    let auth_username = std::env::var("AUTH_USERNAME").unwrap_or_else(|_| "servers".to_string());
+    let auth_password = std::env::var("AUTH_PASSWORD").unwrap_or_else(|_| "Soft@26*".to_string());
+    
+    // Authentication with environment credentials
+    if credentials.username == auth_username && credentials.password == auth_password {
         let flash_message = FlashMessage {
             message: "Login successful!".to_string(),
             type_: "success".to_string(),
@@ -1014,7 +1034,13 @@ pub async fn logout() -> impl Responder {
 pub async fn get_alerts(
     pool: web::Data<SqlitePool>,
     query: Query<AlertQuery>,
+    req: actix_web::HttpRequest,
 ) -> impl Responder {
+    // Check authentication
+    if let Err(response) = check_api_auth(&req) {
+        return response;
+    }
+    
     let metrics_service = MetricsService::new(pool.as_ref().clone());
     
     match metrics_service.get_unresolved_alerts(query.server_id.as_deref()).await {
@@ -1031,7 +1057,13 @@ pub async fn get_alerts(
 #[get("/api/alerts/summary")]
 pub async fn get_alert_summary(
     pool: web::Data<SqlitePool>,
+    req: actix_web::HttpRequest,
 ) -> impl Responder {
+    // Check authentication
+    if let Err(response) = check_api_auth(&req) {
+        return response;
+    }
+    
     let metrics_service = MetricsService::new(pool.as_ref().clone());
     
     match metrics_service.get_alert_summary().await {
@@ -1048,7 +1080,13 @@ pub async fn get_alert_summary(
 #[get("/api/alerts/with-servers")]
 pub async fn get_alerts_with_servers(
     pool: web::Data<SqlitePool>,
+    req: actix_web::HttpRequest,
 ) -> impl Responder {
+    // Check authentication
+    if let Err(response) = check_api_auth(&req) {
+        return response;
+    }
+    
     match get_alerts_with_server_info(&pool).await {
         Ok(alerts) => HttpResponse::Ok().json(alerts),
         Err(e) => {
@@ -1064,7 +1102,13 @@ pub async fn get_alerts_with_servers(
 pub async fn resolve_alert(
     pool: web::Data<SqlitePool>,
     path: web::Path<String>,
+    req: actix_web::HttpRequest,
 ) -> impl Responder {
+    // Check authentication
+    if let Err(response) = check_api_auth(&req) {
+        return response;
+    }
+    
     let alert_id = path.into_inner();
     let now = Utc::now().naive_utc();
     

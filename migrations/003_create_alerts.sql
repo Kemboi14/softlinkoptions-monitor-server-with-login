@@ -7,10 +7,10 @@ CREATE TABLE IF NOT EXISTS alerts (
     message TEXT NOT NULL,
     current_value REAL,
     threshold_value REAL,
-    is_resolved BOOLEAN DEFAULT FALSE,
+    is_resolved INTEGER DEFAULT 0, -- Use INTEGER instead of BOOLEAN for SQLite consistency
     created_at DATETIME NOT NULL,
     resolved_at DATETIME,
-    FOREIGN KEY (server_id) REFERENCES servers (id)
+    FOREIGN KEY (server_id) REFERENCES servers (id) ON DELETE CASCADE
 );
 
 -- Create alert preferences table
@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS alert_preferences (
     memory_threshold REAL DEFAULT 85.0,
     disk_threshold REAL DEFAULT 90.0,
     load_threshold REAL DEFAULT 10.0,
-    enable_notifications BOOLEAN DEFAULT TRUE,
+    enable_notifications INTEGER DEFAULT 1, -- Use INTEGER instead of BOOLEAN for SQLite consistency
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL
 );
