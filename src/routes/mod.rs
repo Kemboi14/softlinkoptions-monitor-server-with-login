@@ -2,27 +2,60 @@ use actix_web::{get, post, delete, web, HttpResponse, Responder};
 use actix_web::web::Query;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
-use crate::models::{Server, ServerStats, ServerWithStats, AverageStats, Alert, AlertWithServer};
+use crate::models::{Server, ServerStats, ServerWithStats, AverageStats, Alert, AlertWithServer, User, UserWithServers};
 use crate::services::MetricsService;
 use chrono::{Utc, Duration};
 use tera::{Tera, Context};
 use uuid::Uuid;
 use tracing::error;
+use bcrypt::{hash, verify as bcrypt_verify, DEFAULT_COST};
 
-// Authentication middleware for API endpoints
-fn check_api_auth(req: &actix_web::HttpRequest) -> Result<(), HttpResponse> {
-    let auth_header = req.headers().get("cookie");
-    let is_authenticated = auth_header
-        .and_then(|cookie| cookie.to_str().ok())
-        .map(|cookie_str| cookie_str.contains("authenticated=true"))
+// ─── Cookie helpers ────────────────────────────────────────────────────────
+
+fn get_cookie_value<'a>(cookie_str: &'a str, key: &str) -> Option<&'a str> {
+    cookie_str.split(';').find_map(|part| {
+        let part = part.trim();
+        let prefix = format!("{}=", key);
+        if part.starts_with(prefix.as_str()) {
+            Some(&part[prefix.len()..])
+        } else {
+            None
+        }
+    })
+}
+
+/// Returns (user_id, user_role) if authenticated, otherwise Err(redirect response)
+fn check_auth(req: &actix_web::HttpRequest) -> Result<(String, String), HttpResponse> {
+    let cookies = req.headers().get("cookie")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let authenticated = get_cookie_value(cookies, "authenticated")
+        .map(|v| v == "true")
         .unwrap_or(false);
-    
-    if !is_authenticated {
+    if !authenticated {
+        return Err(HttpResponse::Found().append_header(("Location", "/login")).finish());
+    }
+    let user_id = get_cookie_value(cookies, "user_id").unwrap_or("").to_string();
+    let user_role = get_cookie_value(cookies, "user_role").unwrap_or("admin").to_string();
+    Ok((user_id, user_role))
+}
+
+/// Same as check_auth but for API endpoints (returns 401 instead of redirect)
+fn check_api_auth(req: &actix_web::HttpRequest) -> Result<(String, String), HttpResponse> {
+    let cookies = req.headers().get("cookie")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let authenticated = get_cookie_value(cookies, "authenticated")
+        .map(|v| v == "true")
+        .unwrap_or(false);
+    if !authenticated {
         return Err(HttpResponse::Unauthorized().json(serde_json::json!({
             "error": "Authentication required"
         })));
     }
-    Ok(())
+    let user_id = get_cookie_value(cookies, "user_id").unwrap_or("").to_string();
+    let user_role = get_cookie_value(cookies, "user_role").unwrap_or("admin").to_string();
+    Ok((user_id, user_role))
 }
 
 #[derive(Deserialize)]
@@ -59,23 +92,15 @@ pub async fn dashboard(
     query: Query<DashboardQuery>,
     req: actix_web::HttpRequest,
 ) -> impl Responder {
-    // Simple authentication check - in production, use proper session management
-    let auth_header = req.headers().get("cookie");
-    let is_authenticated = auth_header
-        .and_then(|cookie| cookie.to_str().ok())
-        .map(|cookie_str| cookie_str.contains("authenticated=true"))
-        .unwrap_or(false);
-    
-    if !is_authenticated {
-        return HttpResponse::Found()
-            .append_header(("Location", "/login"))
-            .finish();
-    }
-    
+    let (user_id, user_role) = match check_auth(&req) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+
     let page = query.page.unwrap_or(1);
-    let limit = query.limit.unwrap_or(50).min(100); // Max 100 per page
+    let limit = query.limit.unwrap_or(50).min(100);
     let offset = (page - 1) * limit;
-    
+
     // Check for flash message in cookies
     let flash_message = req.headers().get("cookie")
         .and_then(|cookie| cookie.to_str().ok())
@@ -95,8 +120,10 @@ pub async fn dashboard(
                         })
                 })
         });
-    
-    match get_servers_with_latest_stats_paginated(&pool, limit, offset, &query.search).await {
+
+    // Admin sees all servers; regular users only see assigned ones
+    let user_filter = if user_role == "admin" { None } else { Some(user_id.as_str()) };
+    match get_servers_with_latest_stats_paginated(&pool, limit, offset, &query.search, user_filter).await {
         Ok((servers, total_count)) => {
             let total_pages = ((total_count as u32 + limit - 1) / limit) as u32;
             
@@ -144,6 +171,7 @@ pub async fn dashboard(
             context.insert("avg_net_in", &avg_net_in_rate); // Update context variable
             context.insert("avg_net_out", &avg_net_out_rate); // Update context variable
             context.insert("online_servers", &server_count);
+            context.insert("user_role", &user_role);
             
             if let Some(flash) = flash_message {
                 context.insert("flash_message", &flash);
@@ -203,7 +231,12 @@ pub async fn edit_server_page(
     pool: web::Data<SqlitePool>,
     tera: web::Data<Tera>,
     path: web::Path<String>,
+    req: actix_web::HttpRequest,
 ) -> impl Responder {
+    let user_role = match require_admin(&req) {
+        Ok((_, role)) => role,
+        Err(r) => return r,
+    };
     let server_id = path.into_inner();
     match sqlx::query_as!(
         Server,
@@ -216,6 +249,7 @@ pub async fn edit_server_page(
         Ok(Some(server)) => {
             let mut ctx = Context::new();
             ctx.insert("server", &server);
+            ctx.insert("user_role", &user_role);
             match tera.render("edit_server.html", &ctx) {
                 Ok(html) => HttpResponse::Ok().content_type("text/html").body(html),
                 Err(e) => HttpResponse::InternalServerError().body(format!("Template error: {}", e)),
@@ -231,7 +265,9 @@ pub async fn edit_server(
     pool: web::Data<SqlitePool>,
     path: web::Path<String>,
     form: web::Form<EditServerForm>,
+    req: actix_web::HttpRequest,
 ) -> impl Responder {
+    if let Err(r) = require_admin(&req) { return r; }
     let server_id = path.into_inner();
     let name = form.name.trim().to_string();
     let ip_address = form.ip_address.trim().to_string();
@@ -281,7 +317,9 @@ pub async fn edit_server(
 pub async fn add_server(
     pool: web::Data<SqlitePool>,
     form: web::Form<NewServerForm>,
+    req: actix_web::HttpRequest,
 ) -> impl Responder {
+    if let Err(r) = require_admin(&req) { return r; }
     let server_id = Uuid::new_v4().to_string();
     
     let now = Utc::now().naive_utc();
@@ -327,7 +365,11 @@ pub async fn add_server(
 pub async fn remove_server(
     pool: web::Data<SqlitePool>,
     path: web::Path<String>,
+    req: actix_web::HttpRequest,
 ) -> impl Responder {
+    if let Err(_) = require_admin(&req) {
+        return HttpResponse::Forbidden().json(serde_json::json!({"success": false, "error": "Admins only"}));
+    }
     let server_id = path.into_inner();
     
     match sqlx::query!("DELETE FROM servers WHERE id = ?", server_id)
@@ -336,23 +378,14 @@ pub async fn remove_server(
     {
         Ok(result) => {
             if result.rows_affected() > 0 {
-                HttpResponse::Found()
-                    .append_header(("Location", "/"))
-                    .append_header(("Set-Cookie", format!("flash_message=Server removed successfully; Path=/; Max-Age=5")))
-                    .finish()
+                HttpResponse::Ok().json(serde_json::json!({"success": true}))
             } else {
-                HttpResponse::Found()
-                    .append_header(("Location", "/"))
-                    .append_header(("Set-Cookie", format!("flash_message=Server not found; Path=/; Max-Age=5")))
-                    .finish()
+                HttpResponse::NotFound().json(serde_json::json!({"success": false, "error": "Server not found"}))
             }
         }
         Err(e) => {
             error!("Database error: {}", e);
-            HttpResponse::Found()
-                .append_header(("Location", "/"))
-                .append_header(("Set-Cookie", format!("flash_message=Failed to remove server; Path=/; Max-Age=5")))
-                .finish()
+            HttpResponse::InternalServerError().json(serde_json::json!({"success": false, "error": "Database error"}))
         }
     }
 }
@@ -362,11 +395,17 @@ pub async fn all_servers_history_page(
     pool: web::Data<SqlitePool>,
     tera: web::Data<Tera>,
     query: Query<DashboardQuery>,
+    req: actix_web::HttpRequest,
 ) -> impl Responder {
+    let (user_id, user_role) = match check_auth(&req) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
     let page = query.page.unwrap_or(1);
     let limit = query.limit.unwrap_or(50).min(100);
     let offset = (page - 1) * limit;
-    match get_servers_with_latest_stats_paginated(&pool, limit, offset, &query.search).await {
+    let user_filter = if user_role == "admin" { None } else { Some(user_id.as_str()) };
+    match get_servers_with_latest_stats_paginated(&pool, limit, offset, &query.search, user_filter).await {
         Ok((servers, total_count)) => {
             let total_pages = ((total_count as u32 + limit - 1) / limit).max(1);
             let mut ctx = Context::new();
@@ -376,6 +415,7 @@ pub async fn all_servers_history_page(
             ctx.insert("total_servers", &total_count);
             ctx.insert("limit", &limit);
             ctx.insert("search", &query.search);
+            ctx.insert("user_role", &user_role);
             match tera.render("all_history.html", &ctx) {
                 Ok(html) => HttpResponse::Ok().content_type("text/html").body(html),
                 Err(e) => HttpResponse::InternalServerError().body(format!("Template error: {}", e)),
@@ -391,7 +431,12 @@ pub async fn server_history_page(
     tera: web::Data<Tera>,
     path: web::Path<String>,
     query: Query<ServerQuery>,
+    req: actix_web::HttpRequest,
 ) -> impl Responder {
+    let user_role = match check_auth(&req) {
+        Ok((_, role)) => role,
+        Err(r) => return r,
+    };
     let server_id = path.into_inner();
     
     // Get server info
@@ -511,6 +556,7 @@ pub async fn server_history_page(
                             // For template display (KB/s)
                             context.insert("avg_net_in_rate_kb", &(average_stats.network_in_rate / 1024.0));
                             context.insert("avg_net_out_rate_kb", &(average_stats.network_out_rate / 1024.0));
+                            context.insert("user_role", &user_role);
                             
                             match tera.render("history.html", &context) {
                                 Ok(rendered) => HttpResponse::Ok().content_type("text/html").body(rendered),
@@ -608,7 +654,7 @@ pub async fn server_history_export(
 
 #[get("/export")]
 pub async fn dashboard_export(pool: web::Data<SqlitePool>) -> impl Responder {
-    let (servers, _) = match get_servers_with_latest_stats_paginated(pool.as_ref(), 10_000, 0, &None).await {
+    let (servers, _) = match get_servers_with_latest_stats_paginated(pool.as_ref(), 10_000, 0, &None, None).await {
         Ok(s) => s,
         Err(_) => return HttpResponse::InternalServerError().body("Failed to fetch data"),
     };
@@ -725,129 +771,98 @@ async fn get_servers_with_latest_stats_paginated(
     limit: u32,
     offset: u32,
     search: &Option<String>,
+    user_id: Option<&str>,
 ) -> Result<(Vec<ServerWithStats>, i64), sqlx::Error> {
-    let total_count = if let Some(search_term) = search {
-        let search_pattern = format!("%{}%", search_term);
-        sqlx::query_scalar!(
-            r#"
-            SELECT COUNT(*) as "count!"
-            FROM servers 
-            WHERE name LIKE ? OR ip_address LIKE ?
-            "#,
-            search_pattern,
-            search_pattern
-        )
-        .fetch_one(pool)
-        .await?
+    // Build the server list, optionally filtered by user assignment
+    let servers: Vec<Server> = if let Some(uid) = user_id {
+        // Regular user: only servers assigned to them
+        if let Some(search_term) = search {
+            let pat = format!("%{}%", search_term);
+            sqlx::query_as!(
+                Server,
+                r#"SELECT s.id as "id!", s.name as "name!", s.ip_address as "ip_address!", s.created_at as "created_at!"
+                   FROM servers s
+                   INNER JOIN user_servers us ON us.server_id = s.id
+                   WHERE us.user_id = ? AND (s.name LIKE ? OR s.ip_address LIKE ?)
+                   ORDER BY s.name ASC LIMIT ? OFFSET ?"#,
+                uid, pat, pat, limit, offset
+            ).fetch_all(pool).await?
+        } else {
+            sqlx::query_as!(
+                Server,
+                r#"SELECT s.id as "id!", s.name as "name!", s.ip_address as "ip_address!", s.created_at as "created_at!"
+                   FROM servers s
+                   INNER JOIN user_servers us ON us.server_id = s.id
+                   WHERE us.user_id = ?
+                   ORDER BY s.name ASC LIMIT ? OFFSET ?"#,
+                uid, limit, offset
+            ).fetch_all(pool).await?
+        }
     } else {
-        sqlx::query_scalar!(
-            r#"
-            SELECT COUNT(*) as "count!"
-            FROM servers
-            "#
-        )
-        .fetch_one(pool)
-        .await?
+        // Admin: all servers
+        if let Some(search_term) = search {
+            let pat = format!("%{}%", search_term);
+            sqlx::query_as!(
+                Server,
+                r#"SELECT id as "id!", name as "name!", ip_address as "ip_address!", created_at as "created_at!"
+                   FROM servers WHERE name LIKE ? OR ip_address LIKE ?
+                   ORDER BY name ASC LIMIT ? OFFSET ?"#,
+                pat, pat, limit, offset
+            ).fetch_all(pool).await?
+        } else {
+            sqlx::query_as!(
+                Server,
+                r#"SELECT id as "id!", name as "name!", ip_address as "ip_address!", created_at as "created_at!"
+                   FROM servers ORDER BY name ASC LIMIT ? OFFSET ?"#,
+                limit, offset
+            ).fetch_all(pool).await?
+        }
     };
 
-    let servers = if let Some(search_term) = search {
-        let search_pattern = format!("%{}%", search_term);
-        sqlx::query_as!(
-            Server,
-            r#"
-            SELECT id as "id!", name as "name!", ip_address as "ip_address!", created_at as "created_at!"
-            FROM servers 
-            WHERE name LIKE ? OR ip_address LIKE ?
-            ORDER BY name ASC
-            LIMIT ? OFFSET ?
-            "#,
-            search_pattern,
-            search_pattern,
-            limit,
-            offset
-        )
-        .fetch_all(pool)
-        .await?
+    let total_count: i64 = if let Some(uid) = user_id {
+        if let Some(search_term) = search {
+            let pat = format!("%{}%", search_term);
+            sqlx::query_scalar!(
+                r#"SELECT COUNT(*) as "count!" FROM servers s
+                   INNER JOIN user_servers us ON us.server_id = s.id
+                   WHERE us.user_id = ? AND (s.name LIKE ? OR s.ip_address LIKE ?)"#,
+                uid, pat, pat
+            ).fetch_one(pool).await? as i64
+        } else {
+            sqlx::query_scalar!(
+                r#"SELECT COUNT(*) as "count!" FROM user_servers WHERE user_id = ?"#,
+                uid
+            ).fetch_one(pool).await? as i64
+        }
+    } else if let Some(search_term) = search {
+        let pat = format!("%{}%", search_term);
+        sqlx::query_scalar!(
+            r#"SELECT COUNT(*) as "count!" FROM servers WHERE name LIKE ? OR ip_address LIKE ?"#,
+            pat, pat
+        ).fetch_one(pool).await? as i64
     } else {
-        sqlx::query_as!(
-            Server,
-            r#"
-            SELECT id as "id!", name as "name!", ip_address as "ip_address!", created_at as "created_at!"
-            FROM servers
-            ORDER BY name ASC
-            LIMIT ? OFFSET ?
-            "#,
-            limit,
-            offset
-        )
-        .fetch_all(pool)
-        .await?
+        sqlx::query_scalar!(r#"SELECT COUNT(*) as "count!" FROM servers"#)
+            .fetch_one(pool).await? as i64
     };
 
     let mut result = Vec::new();
-    
     for server in servers {
         let latest_stats = sqlx::query_as!(
             ServerStats,
-            r#"
-                 SELECT id as "id!", server_id as "server_id!", cpu_usage as "cpu_usage!", 
-                     memory_usage as "memory_usage!", memory_total as "memory_total!",
-                     disk_usage as "disk_usage!", load_avg as "load_avg!", 
-                     logged_users as "logged_users!", network_in as "network_in!", 
-                     network_out as "network_out!", network_in_rate as "network_in_rate!", network_out_rate as "network_out_rate!",
-                     disk_read_rate as "disk_read_rate!", disk_write_rate as "disk_write_rate!", uptime as "uptime!", 
-                     created_at as "created_at!"
-            FROM server_stats
-            WHERE server_id = ?
-            ORDER BY created_at DESC
-            LIMIT 1
-            "#,
+            r#"SELECT id as "id!", server_id as "server_id!", cpu_usage as "cpu_usage!", 
+                 memory_usage as "memory_usage!", memory_total as "memory_total!",
+                 disk_usage as "disk_usage!", load_avg as "load_avg!", 
+                 logged_users as "logged_users!", network_in as "network_in!", 
+                 network_out as "network_out!", network_in_rate as "network_in_rate!", network_out_rate as "network_out_rate!",
+                 disk_read_rate as "disk_read_rate!", disk_write_rate as "disk_write_rate!", uptime as "uptime!", 
+                 created_at as "created_at!"
+               FROM server_stats WHERE server_id = ? ORDER BY created_at DESC LIMIT 1"#,
             server.id
-        )
-        .fetch_optional(pool)
-        .await?;
-        
-        result.push(ServerWithStats {
-            server,
-            latest_stats,
-        });
+        ).fetch_optional(pool).await?;
+        result.push(ServerWithStats { server, latest_stats });
     }
-    
-    Ok((result, total_count as i64))
-}
 
-async fn get_servers_with_latest_stats(pool: &SqlitePool) -> Result<Vec<ServerWithStats>, sqlx::Error> {
-    let servers = get_all_servers(pool).await?;
-    let mut result = Vec::new();
-    
-    for server in servers {
-        let latest_stats = sqlx::query_as!(
-            ServerStats,
-            r#"
-                 SELECT id as "id!", server_id as "server_id!", cpu_usage as "cpu_usage!", 
-                     memory_usage as "memory_usage!", memory_total as "memory_total!",
-                     disk_usage as "disk_usage!", load_avg as "load_avg!", 
-                     logged_users as "logged_users!", network_in as "network_in!", 
-                     network_out as "network_out!", network_in_rate as "network_in_rate!", network_out_rate as "network_out_rate!",
-                     disk_read_rate as "disk_read_rate!", disk_write_rate as "disk_write_rate!", uptime as "uptime!", 
-                     created_at as "created_at!"
-            FROM server_stats
-            WHERE server_id = ?
-            ORDER BY created_at DESC
-            LIMIT 1
-            "#,
-            server.id
-        )
-        .fetch_optional(pool)
-        .await?;
-        
-        result.push(ServerWithStats {
-            server,
-            latest_stats,
-        });
-    }
-    
-    Ok(result)
+    Ok((result, total_count))
 }
 
 async fn get_server_history_paginated(
@@ -900,36 +915,6 @@ async fn get_server_history_paginated(
     Ok((stats, total_count))
 }
 
-async fn get_server_history(
-    pool: &SqlitePool,
-    server_id: &str,
-    hours: i64,
-) -> Result<Vec<ServerStats>, sqlx::Error> {
-    let since = (Utc::now() - Duration::hours(hours)).naive_utc();
-    
-    let stats = sqlx::query_as!(
-        ServerStats,
-        r#"
-         SELECT id as "id!", server_id as "server_id!", cpu_usage as "cpu_usage!", 
-             memory_usage as "memory_usage!", memory_total as "memory_total!",
-             disk_usage as "disk_usage!", load_avg as "load_avg!", 
-             logged_users as "logged_users!", network_in as "network_in!", 
-             network_out as "network_out!", network_in_rate as "network_in_rate!", network_out_rate as "network_out_rate!",
-             disk_read_rate as "disk_read_rate!", disk_write_rate as "disk_write_rate!", uptime as "uptime!", 
-             created_at as "created_at!"
-        FROM server_stats
-        WHERE server_id = ? AND created_at >= ?
-        ORDER BY created_at ASC
-        "#,
-        server_id,
-        since
-    )
-    .fetch_all(pool)
-    .await?;
-    
-    Ok(stats)
-}
-
 async fn get_average_stats(
     pool: &SqlitePool,
     server_id: &str,
@@ -976,44 +961,54 @@ pub async fn login_page(
     tera: web::Data<Tera>,
 ) -> impl Responder {
     let context = Context::new();
-    
     HttpResponse::Ok()
         .content_type("text/html")
-        .body(tera.render("login.html", &context).unwrap_or_else(|_| {
-            "Template error".to_string()
-        }))
+        .body(tera.render("login.html", &context).unwrap_or_else(|_| "Template error".to_string()))
 }
 
 #[post("/login")]
 pub async fn login(
+    pool: web::Data<SqlitePool>,
     credentials: web::Form<LoginCredentials>,
 ) -> impl Responder {
-    // Get credentials from environment variables
-    let auth_username = std::env::var("AUTH_USERNAME").unwrap_or_else(|_| "servers".to_string());
-    let auth_password = std::env::var("AUTH_PASSWORD").unwrap_or_else(|_| "Soft@26*".to_string());
-    
-    // Authentication with environment credentials
-    if credentials.username == auth_username && credentials.password == auth_password {
-        let flash_message = FlashMessage {
-            message: "Login successful!".to_string(),
-            type_: "success".to_string(),
-        };
-        
-        return HttpResponse::Found()
-            .append_header(("Location", "/"))
-            .append_header(("Set-Cookie", format!("flash_message={}:success; Path=/; HttpOnly", flash_message.message)))
-            .append_header(("Set-Cookie", "authenticated=true; Path=/; HttpOnly"))
-            .finish();
+    // 1) Try matching a DB user
+    let db_user = sqlx::query_as!(
+        User,
+        r#"SELECT id as "id!", username as "username!", password_hash as "password_hash!",
+           role as "role!", created_at as "created_at!" FROM users WHERE username = ?"#,
+        credentials.username
+    )
+    .fetch_optional(pool.as_ref())
+    .await
+    .unwrap_or(None);
+
+    if let Some(user) = db_user {
+        let valid = bcrypt_verify(&credentials.password, &user.password_hash).unwrap_or(false);
+        if valid {
+            return HttpResponse::Found()
+                .append_header(("Location", "/"))
+                .append_header(("Set-Cookie", "authenticated=true; Path=/; HttpOnly"))
+                .append_header(("Set-Cookie", format!("user_id={}; Path=/; HttpOnly", user.id)))
+                .append_header(("Set-Cookie", format!("user_role={}; Path=/; HttpOnly", user.role)))
+                .finish();
+        }
+    } else {
+        // 2) Fall back to env-var admin credentials
+        let auth_username = std::env::var("AUTH_USERNAME").unwrap_or_else(|_| "servers".to_string());
+        let auth_password = std::env::var("AUTH_PASSWORD").unwrap_or_else(|_| "Soft@26*".to_string());
+        if credentials.username == auth_username && credentials.password == auth_password {
+            return HttpResponse::Found()
+                .append_header(("Location", "/"))
+                .append_header(("Set-Cookie", "authenticated=true; Path=/; HttpOnly"))
+                .append_header(("Set-Cookie", "user_id=env_admin; Path=/; HttpOnly"))
+                .append_header(("Set-Cookie", "user_role=admin; Path=/; HttpOnly"))
+                .finish();
+        }
     }
-    
-    let flash_message = FlashMessage {
-        message: "Invalid username or password".to_string(),
-        type_: "danger".to_string(),
-    };
-    
+
     HttpResponse::Found()
         .append_header(("Location", "/login"))
-        .append_header(("Set-Cookie", format!("flash_message={}:danger; Path=/; HttpOnly", flash_message.message)))
+        .append_header(("Set-Cookie", "flash_message=Invalid username or password:danger; Path=/; Max-Age=5"))
         .finish()
 }
 
@@ -1022,6 +1017,8 @@ pub async fn logout() -> impl Responder {
     HttpResponse::Found()
         .append_header(("Location", "/login"))
         .append_header(("Set-Cookie", "authenticated=; Max-Age=0; Path=/"))
+        .append_header(("Set-Cookie", "user_id=; Max-Age=0; Path=/"))
+        .append_header(("Set-Cookie", "user_role=; Max-Age=0; Path=/"))
         .append_header(("Set-Cookie", "flash_message=; Max-Age=0; Path=/"))
         .finish()
 }
@@ -1036,7 +1033,6 @@ pub async fn get_alerts(
     query: Query<AlertQuery>,
     req: actix_web::HttpRequest,
 ) -> impl Responder {
-    // Check authentication
     if let Err(response) = check_api_auth(&req) {
         return response;
     }
@@ -1059,7 +1055,6 @@ pub async fn get_alert_summary(
     pool: web::Data<SqlitePool>,
     req: actix_web::HttpRequest,
 ) -> impl Responder {
-    // Check authentication
     if let Err(response) = check_api_auth(&req) {
         return response;
     }
@@ -1082,7 +1077,6 @@ pub async fn get_alerts_with_servers(
     pool: web::Data<SqlitePool>,
     req: actix_web::HttpRequest,
 ) -> impl Responder {
-    // Check authentication
     if let Err(response) = check_api_auth(&req) {
         return response;
     }
@@ -1104,7 +1098,6 @@ pub async fn resolve_alert(
     path: web::Path<String>,
     req: actix_web::HttpRequest,
 ) -> impl Responder {
-    // Check authentication
     if let Err(response) = check_api_auth(&req) {
         return response;
     }
@@ -1144,7 +1137,6 @@ pub async fn resolve_alert(
 #[derive(Deserialize)]
 struct AlertQuery {
     server_id: Option<String>,
-    resolved: Option<bool>,
 }
 
 async fn get_alerts_with_server_info(pool: &SqlitePool) -> Result<Vec<AlertWithServer>, sqlx::Error> {
@@ -1152,7 +1144,7 @@ async fn get_alerts_with_server_info(pool: &SqlitePool) -> Result<Vec<AlertWithS
         Alert,
         r#"SELECT id as "id!", server_id as "server_id!", alert_type as "alert_type!", 
            metric_type as "metric_type!", message as "message!", current_value, threshold_value,
-           is_resolved as "is_resolved!", created_at as "created_at!", resolved_at
+           CAST(is_resolved AS INTEGER) as "is_resolved!: bool", created_at as "created_at!", resolved_at
            FROM alerts 
            WHERE is_resolved = FALSE 
            ORDER BY created_at DESC"#
@@ -1184,3 +1176,340 @@ async fn get_alerts_with_server_info(pool: &SqlitePool) -> Result<Vec<AlertWithS
     
     Ok(result)
 }
+
+// =========================
+// USER MANAGEMENT (admin only)
+// =========================
+
+#[derive(Deserialize)]
+struct NewUserForm {
+    username: String,
+    password: String,
+    role: String,
+    server_ids: Option<String>, // comma-separated server IDs from hidden input
+}
+
+#[derive(Deserialize)]
+struct EditUserForm {
+    password: Option<String>,
+    role: String,
+    server_ids: Option<String>,
+}
+
+fn require_admin(req: &actix_web::HttpRequest) -> Result<(String, String), HttpResponse> {
+    let (user_id, user_role) = check_auth(req)?;
+    if user_role != "admin" {
+        return Err(HttpResponse::Forbidden().body("Admins only"));
+    }
+    Ok((user_id, user_role))
+}
+
+#[get("/users")]
+pub async fn list_users(
+    pool: web::Data<SqlitePool>,
+    tera: web::Data<Tera>,
+    req: actix_web::HttpRequest,
+) -> impl Responder {
+    let user_role = match require_admin(&req) {
+        Ok((_, role)) => role,
+        Err(r) => return r,
+    };
+
+    // Read flash message from cookie (same pattern as dashboard)
+    let flash_message = req.headers().get("cookie")
+        .and_then(|cookie| cookie.to_str().ok())
+        .and_then(|cookie_str| {
+            cookie_str.split(';')
+                .find(|c| c.trim().starts_with("flash_message="))
+                .and_then(|c| {
+                    c.trim().strip_prefix("flash_message=")
+                        .map(|msg| FlashMessage {
+                            message: msg.to_string(),
+                            type_: if msg.contains("success") { "success".to_string() }
+                                   else if msg.contains("fail") || msg.contains("error") { "danger".to_string() }
+                                   else { "info".to_string() },
+                        })
+                })
+        });
+
+    let users = sqlx::query_as!(
+        User,
+        r#"SELECT id as "id!", username as "username!", password_hash as "password_hash!",
+           role as "role!", created_at as "created_at!" FROM users ORDER BY username ASC"#
+    )
+    .fetch_all(pool.as_ref())
+    .await;
+
+    match users {
+        Ok(users) => {
+            let mut users_with_servers: Vec<UserWithServers> = Vec::new();
+            for user in users {
+                let servers = sqlx::query_as!(
+                    Server,
+                    r#"SELECT s.id as "id!", s.name as "name!", s.ip_address as "ip_address!", s.created_at as "created_at!"
+                       FROM servers s INNER JOIN user_servers us ON us.server_id = s.id
+                       WHERE us.user_id = ? ORDER BY s.name ASC"#,
+                    user.id
+                )
+                .fetch_all(pool.as_ref())
+                .await
+                .unwrap_or_default();
+                users_with_servers.push(UserWithServers { user, servers });
+            }
+            let mut ctx = Context::new();
+            ctx.insert("users", &users_with_servers);
+            ctx.insert("user_role", &user_role);
+            if let Some(flash) = flash_message {
+                ctx.insert("flash_message", &flash);
+            }
+            let html = match tera.render("users_list.html", &ctx) {
+                Ok(h) => h,
+                Err(e) => return HttpResponse::InternalServerError().body(format!("Template error: {}", e)),
+            };
+            use actix_web::http::header::{HeaderValue, HeaderName};
+            let mut response = HttpResponse::Ok().content_type("text/html").body(html);
+            response.headers_mut().insert(
+                HeaderName::from_static("set-cookie"),
+                HeaderValue::from_str("flash_message=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT").unwrap()
+            );
+            response
+        }
+        Err(e) => {
+            error!("Failed to fetch users: {}", e);
+            HttpResponse::InternalServerError().body("Database error")
+        }
+    }
+}
+
+#[get("/users/add")]
+pub async fn add_user_page(
+    pool: web::Data<SqlitePool>,
+    tera: web::Data<Tera>,
+    req: actix_web::HttpRequest,
+) -> impl Responder {
+    let user_role = match require_admin(&req) {
+        Ok((_, role)) => role,
+        Err(r) => return r,
+    };
+
+    let all_servers = sqlx::query_as!(
+        Server,
+        r#"SELECT id as "id!", name as "name!", ip_address as "ip_address!", created_at as "created_at!"
+           FROM servers ORDER BY name ASC"#
+    )
+    .fetch_all(pool.as_ref())
+    .await
+    .unwrap_or_default();
+
+    let mut ctx = Context::new();
+    ctx.insert("all_servers", &all_servers);
+    ctx.insert("user_role", &user_role);
+    match tera.render("add_user.html", &ctx) {
+        Ok(html) => HttpResponse::Ok().content_type("text/html").body(html),
+        Err(e) => HttpResponse::InternalServerError().body(format!("Template error: {}", e)),
+    }
+}
+
+#[post("/users/add")]
+pub async fn add_user(
+    pool: web::Data<SqlitePool>,
+    form: web::Form<NewUserForm>,
+    req: actix_web::HttpRequest,
+) -> impl Responder {
+    if let Err(r) = require_admin(&req) { return r; }
+
+    let username = form.username.trim().to_string();
+    let role = if form.role == "admin" { "admin" } else { "user" };
+
+    if username.is_empty() || form.password.is_empty() {
+        return HttpResponse::Found()
+            .append_header(("Location", "/users/add"))
+            .append_header(("Set-Cookie", "flash_message=Username and password are required; Path=/; Max-Age=5"))
+            .finish();
+    }
+
+    let pw_hash = match hash(&form.password, DEFAULT_COST) {
+        Ok(h) => h,
+        Err(_) => return HttpResponse::InternalServerError().body("Password hashing failed"),
+    };
+
+    let user_id = Uuid::new_v4().to_string();
+    let now = Utc::now().naive_utc();
+
+    let insert_result = sqlx::query!(
+        "INSERT INTO users (id, username, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?)",
+        user_id, username, pw_hash, role, now
+    )
+    .execute(pool.as_ref())
+    .await;
+
+    match insert_result {
+        Err(ref e) if e.to_string().contains("UNIQUE constraint failed") => {
+            return HttpResponse::Found()
+                .append_header(("Location", "/users/add"))
+                .append_header(("Set-Cookie", "flash_message=Username already exists; Path=/; Max-Age=5"))
+                .finish();
+        }
+        Err(e) => {
+            error!("Failed to create user: {}", e);
+            return HttpResponse::InternalServerError().body("Database error");
+        }
+        Ok(_) => {}
+    }
+
+    // Assign servers
+    if let Some(ids_str) = &form.server_ids {
+        for sid in ids_str.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+            let _ = sqlx::query!(
+                "INSERT OR IGNORE INTO user_servers (user_id, server_id) VALUES (?, ?)",
+                user_id, sid
+            )
+            .execute(pool.as_ref())
+            .await;
+        }
+    }
+
+    HttpResponse::Found()
+        .append_header(("Location", "/users"))
+        .append_header(("Set-Cookie", "flash_message=User created successfully; Path=/; Max-Age=5"))
+        .finish()
+}
+
+#[get("/users/{id}/edit")]
+pub async fn edit_user_page(
+    pool: web::Data<SqlitePool>,
+    tera: web::Data<Tera>,
+    path: web::Path<String>,
+    req: actix_web::HttpRequest,
+) -> impl Responder {
+    let user_role = match require_admin(&req) {
+        Ok((_, role)) => role,
+        Err(r) => return r,
+    };
+
+    let uid = path.into_inner();
+
+    let user = sqlx::query_as!(
+        User,
+        r#"SELECT id as "id!", username as "username!", password_hash as "password_hash!",
+           role as "role!", created_at as "created_at!" FROM users WHERE id = ?"#,
+        uid
+    )
+    .fetch_optional(pool.as_ref())
+    .await;
+
+    match user {
+        Ok(Some(user)) => {
+            let all_servers = sqlx::query_as!(
+                Server,
+                r#"SELECT id as "id!", name as "name!", ip_address as "ip_address!", created_at as "created_at!"
+                   FROM servers ORDER BY name ASC"#
+            )
+            .fetch_all(pool.as_ref())
+            .await
+            .unwrap_or_default();
+
+            let assigned_ids: Vec<String> = sqlx::query_scalar!(
+                r#"SELECT server_id as "server_id!" FROM user_servers WHERE user_id = ?"#,
+                user.id
+            )
+            .fetch_all(pool.as_ref())
+            .await
+            .unwrap_or_default();
+
+            let mut ctx = Context::new();
+            ctx.insert("user", &user);
+            ctx.insert("all_servers", &all_servers);
+            ctx.insert("assigned_ids", &assigned_ids);
+            ctx.insert("user_role", &user_role);
+            match tera.render("edit_user.html", &ctx) {
+                Ok(html) => HttpResponse::Ok().content_type("text/html").body(html),
+                Err(e) => HttpResponse::InternalServerError().body(format!("Template error: {}", e)),
+            }
+        }
+        Ok(None) => HttpResponse::NotFound().body("User not found"),
+        Err(e) => {
+            error!("DB error: {}", e);
+            HttpResponse::InternalServerError().body("Database error")
+        }
+    }
+}
+
+#[post("/users/{id}/edit")]
+pub async fn edit_user(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<String>,
+    form: web::Form<EditUserForm>,
+    req: actix_web::HttpRequest,
+) -> impl Responder {
+    if let Err(r) = require_admin(&req) { return r; }
+
+    let uid = path.into_inner();
+    let role = if form.role == "admin" { "admin" } else { "user" };
+
+    if let Some(pw) = &form.password {
+        if !pw.is_empty() {
+            let pw_hash = match hash(pw, DEFAULT_COST) {
+                Ok(h) => h,
+                Err(_) => return HttpResponse::InternalServerError().body("Password hashing failed"),
+            };
+            let _ = sqlx::query!(
+                "UPDATE users SET password_hash = ?, role = ? WHERE id = ?",
+                pw_hash, role, uid
+            )
+            .execute(pool.as_ref())
+            .await;
+        } else {
+            let _ = sqlx::query!("UPDATE users SET role = ? WHERE id = ?", role, uid)
+                .execute(pool.as_ref())
+                .await;
+        }
+    } else {
+        let _ = sqlx::query!("UPDATE users SET role = ? WHERE id = ?", role, uid)
+            .execute(pool.as_ref())
+            .await;
+    }
+
+    // Replace server assignments atomically
+    let _ = sqlx::query!("DELETE FROM user_servers WHERE user_id = ?", uid)
+        .execute(pool.as_ref())
+        .await;
+
+    if let Some(ids_str) = &form.server_ids {
+        for sid in ids_str.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+            let _ = sqlx::query!(
+                "INSERT OR IGNORE INTO user_servers (user_id, server_id) VALUES (?, ?)",
+                uid, sid
+            )
+            .execute(pool.as_ref())
+            .await;
+        }
+    }
+
+    HttpResponse::Found()
+        .append_header(("Location", "/users"))
+        .append_header(("Set-Cookie", "flash_message=User updated successfully; Path=/; Max-Age=5"))
+        .finish()
+}
+
+#[delete("/users/{id}")]
+pub async fn delete_user(
+    pool: web::Data<SqlitePool>,
+    path: web::Path<String>,
+    req: actix_web::HttpRequest,
+) -> impl Responder {
+    if let Err(r) = require_admin(&req) { return r; }
+
+    let uid = path.into_inner();
+    match sqlx::query!("DELETE FROM users WHERE id = ?", uid)
+        .execute(pool.as_ref())
+        .await
+    {
+        Ok(_) => HttpResponse::Ok().json(serde_json::json!({"success": true})),
+        Err(e) => {
+            error!("Failed to delete user: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({"error": "Failed to delete user"}))
+        }
+    }
+}
+

@@ -1,43 +1,41 @@
 {% extends "base.html" %}
-{% block title %}Server Dashboard{% endblock %}
+{% block title %}Data Centre Monitoring{% endblock %}
 
 {% block content %}
 <div class="fade-in">
   <!-- Header Section -->
-  <div class="d-flex justify-content-between align-items-center mb-4">
+  <div class="d-flex justify-content-between align-items-start mb-3">
     <div>
-      <h2 class="mb-2 fw-bold" style="font-size: 1.75rem; color: var(--text-primary);">
+      <h2 class="mb-1 fw-bold" style="font-size: 1.75rem; color: var(--text-primary);">
         <i class="bi bi-speedometer2 me-2"></i>
-        Server Dashboard
+        Data Centre Monitoring (DCM)
+        <span id="alert-count-badge" class="badge bg-warning text-dark ms-2 align-middle" style="font-size:0.85rem; display:none;"></span>
       </h2>
       <p class="mb-0" style="color: var(--text-secondary); font-size: 1rem;">Real-time monitoring and performance analytics</p>
     </div>
-    <div class="d-flex gap-3">
-      <div class="text-end">
-        <div class="small text-muted">System Status</div>
-        <div class="badge bg-success">
-          <i class="bi bi-activity me-1"></i> All Systems Operational
-        </div>
+    <div class="text-end">
+      <div class="small text-muted mb-1">System Status</div>
+      <div id="system-status-badge" class="badge bg-success fs-6">
+        <i class="bi bi-activity me-1"></i> All Systems Operational
       </div>
     </div>
   </div>
 
   <!-- Alerts Section -->
   <div id="alerts-section" class="mb-4" style="display: none;">
-    <div class="card border-0 shadow-sm">
-      <div class="card-header bg-white border-bottom">
-        <div class="d-flex justify-content-between align-items-center">
-          <h5 class="mb-0 fw-bold">
-            <i class="bi bi-exclamation-triangle me-2"></i>
-            Active Alerts
-          </h5>
-          <button class="btn btn-sm btn-outline-secondary" onclick="refreshAlerts()">
-            <i class="bi bi-arrow-clockwise me-1"></i> Refresh
-          </button>
-        </div>
+    <div class="card border-0 shadow-sm" style="border-left: 4px solid #f59e0b !important;">
+      <div class="card-header d-flex justify-content-between align-items-center py-2"
+           style="background: rgba(245,158,11,0.12); border-bottom: 1px solid rgba(245,158,11,0.25);">
+        <h6 class="mb-0 fw-bold text-warning">
+          <i class="bi bi-exclamation-triangle-fill me-2"></i>
+          Active Alerts
+        </h6>
+        <button class="btn btn-sm btn-outline-warning py-0" onclick="refreshAlerts()">
+          <i class="bi bi-arrow-clockwise me-1"></i> Refresh
+        </button>
       </div>
-      <div class="card-body p-0">
-        <div id="alerts-container" class="p-3">
+      <div class="card-body p-3">
+        <div id="alerts-container">
           <!-- Alerts will be loaded here -->
         </div>
       </div>
@@ -45,137 +43,90 @@
   </div>
 
   <!-- Stats Cards -->
-  <div class="row mb-4 g-3">
-    <div class="col-md-3 col-sm-6">
-      <div class="card bg-gradient-success text-white border-0 shadow-lg metric-card">
-        <div class="card-body">
-          <div class="d-flex justify-content-between align-items-center">
-            <div>
-              <h6 class="card-title mb-1 opacity-90">Total Servers</h6>
-              <h2 class="mb-0 fw-bold display-6">{{ total_servers }}</h2>
-              <div class="mt-2">
-                <small class="opacity-75">
-                  <i class="bi bi-activity me-1"></i>
-                  <span class="online-indicator">{{ online_servers }}</span> online
-                </small>
-              </div>
-            </div>
-            <div class="fs-1 opacity-75">
-              <i class="bi bi-server"></i>
-            </div>
+  <div class="row mb-3 g-2 align-items-stretch">
+    <div class="col-md-2 col-sm-4 col-6 d-flex">
+      <div class="card bg-gradient-success text-white border-0 shadow metric-card w-100">
+        <div class="card-body p-2 d-flex flex-column justify-content-between">
+          <div>
+            <h6 class="card-title mb-0 opacity-90" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.04em;">Total Servers</h6>
+            <div class="fw-bold" style="font-size:1.4rem;line-height:1.2;">{{ total_servers }}</div>
+          </div>
+          <div class="d-flex justify-content-between align-items-end mt-1">
+            <small class="opacity-75" style="font-size:.65rem;"><i class="bi bi-activity me-1"></i><span class="online-indicator">{{ online_servers }}</span> online</small>
+            <i class="bi bi-server opacity-50" style="font-size:1.2rem;"></i>
           </div>
         </div>
       </div>
     </div>
-    <div class="col-md-3 col-sm-6">
-      <div class="card bg-gradient-info text-white border-0 shadow-lg metric-card">
-        <div class="card-body">
-          <div class="d-flex justify-content-between align-items-center">
-            <div>
-              <h6 class="card-title mb-1 opacity-90">Avg CPU</h6>
-              <h2 class="mb-0 fw-bold display-6">{{ avg_cpu | round(precision=1) }}%</h2>
-              <div class="mt-2">
-                <div class="progress" style="height: 4px;">
-                  <div class="progress-bar {% if avg_cpu > 85 %}bg-danger{% elif avg_cpu > 65 %}bg-warning{% else %}bg-success{% endif %}" 
-                       style="width: {{ avg_cpu }}%"></div>
-                </div>
-              </div>
-            </div>
-            <div class="fs-1 opacity-75">
-              <i class="bi bi-cpu"></i>
-            </div>
+    <div class="col-md-2 col-sm-4 col-6 d-flex">
+      <div class="card bg-gradient-info text-white border-0 shadow metric-card w-100">
+        <div class="card-body p-2 d-flex flex-column justify-content-between">
+          <div>
+            <h6 class="card-title mb-0 opacity-90" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.04em;">Avg CPU</h6>
+            <div class="fw-bold" style="font-size:1.4rem;line-height:1.2;">{{ avg_cpu | round(precision=1) }}%</div>
+          </div>
+          <div class="d-flex justify-content-between align-items-end mt-1">
+            <div class="progress flex-grow-1 me-2" style="height:3px;"><div class="progress-bar {% if avg_cpu > 85 %}bg-danger{% elif avg_cpu > 65 %}bg-warning{% else %}bg-success{% endif %}" style="width:{{ avg_cpu }}%"></div></div>
+            <i class="bi bi-cpu opacity-50" style="font-size:1.2rem;"></i>
           </div>
         </div>
       </div>
     </div>
-    <div class="col-md-3 col-sm-6">
-      <div class="card bg-gradient-warning text-white border-0 shadow-lg metric-card">
-        <div class="card-body">
-          <div class="d-flex justify-content-between align-items-center">
-            <div>
-              <h6 class="card-title mb-1 opacity-90">Avg Memory</h6>
-              <h2 class="mb-0 fw-bold display-6">{{ avg_memory | round(precision=1) }}%</h2>
-              <div class="mt-2">
-                <div class="progress" style="height: 4px;">
-                  <div class="progress-bar {% if avg_memory > 85 %}bg-danger{% elif avg_memory > 65 %}bg-warning{% else %}bg-info{% endif %}" 
-                       style="width: {{ avg_memory }}%"></div>
-                </div>
-              </div>
-            </div>
-            <div class="fs-1 opacity-75">
-              <i class="bi bi-memory"></i>
-            </div>
+    <div class="col-md-2 col-sm-4 col-6 d-flex">
+      <div class="card bg-gradient-warning text-white border-0 shadow metric-card w-100">
+        <div class="card-body p-2 d-flex flex-column justify-content-between">
+          <div>
+            <h6 class="card-title mb-0 opacity-90" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.04em;">Avg Memory</h6>
+            <div class="fw-bold" style="font-size:1.4rem;line-height:1.2;">{{ avg_memory | round(precision=1) }}%</div>
+          </div>
+          <div class="d-flex justify-content-between align-items-end mt-1">
+            <div class="progress flex-grow-1 me-2" style="height:3px;"><div class="progress-bar {% if avg_memory > 85 %}bg-danger{% elif avg_memory > 65 %}bg-warning{% else %}bg-info{% endif %}" style="width:{{ avg_memory }}%"></div></div>
+            <i class="bi bi-memory opacity-50" style="font-size:1.2rem;"></i>
           </div>
         </div>
       </div>
     </div>
-    <div class="col-md-3 col-sm-6">
-      <div class="card bg-gradient-primary text-white border-0 shadow-lg metric-card">
-        <div class="card-body">
-          <div class="d-flex justify-content-between align-items-center">
-            <div>
-              <h6 class="card-title mb-1 opacity-90">Avg Disk</h6>
-              <h2 class="mb-0 fw-bold display-6">{{ avg_disk | round(precision=1) }}%</h2>
-              <div class="mt-2">
-                <div class="progress" style="height: 4px;">
-                  <div class="progress-bar {% if avg_disk > 90 %}bg-danger{% elif avg_disk > 70 %}bg-warning{% else %}bg-light{% endif %}" 
-                       style="width: {{ avg_disk }}%"></div>
-                </div>
-              </div>
-            </div>
-            <div class="fs-1 opacity-75">
-              <i class="bi bi-hdd"></i>
-            </div>
+    <div class="col-md-2 col-sm-4 col-6 d-flex">
+      <div class="card bg-gradient-primary text-white border-0 shadow metric-card w-100">
+        <div class="card-body p-2 d-flex flex-column justify-content-between">
+          <div>
+            <h6 class="card-title mb-0 opacity-90" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.04em;">Avg Disk</h6>
+            <div class="fw-bold" style="font-size:1.4rem;line-height:1.2;">{{ avg_disk | round(precision=1) }}%</div>
+          </div>
+          <div class="d-flex justify-content-between align-items-end mt-1">
+            <div class="progress flex-grow-1 me-2" style="height:3px;"><div class="progress-bar {% if avg_disk > 90 %}bg-danger{% elif avg_disk > 70 %}bg-warning{% else %}bg-light{% endif %}" style="width:{{ avg_disk }}%"></div></div>
+            <i class="bi bi-hdd opacity-50" style="font-size:1.2rem;"></i>
           </div>
         </div>
       </div>
     </div>
-  </div>
-
-  <!-- Add Server Form -->
-  <div class="card mb-4 border-0 shadow-lg">
-    <div class="card-header bg-gradient text-white" style="background: var(--primary-gradient);">
-      <h5 class="mb-0">
-        <i class="bi bi-plus-circle me-2"></i>
-        Add New Server
-      </h5>
+    <div class="col-md-2 col-sm-4 col-6 d-flex">
+      <div class="card text-white border-0 shadow metric-card w-100" style="background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);">
+        <div class="card-body p-2 d-flex flex-column justify-content-between">
+          <div>
+            <h6 class="card-title mb-0 opacity-90" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.04em;">Emails</h6>
+            <div class="fw-bold" style="font-size:1.4rem;line-height:1.2;">100K+</div>
+          </div>
+          <div class="d-flex justify-content-between align-items-end mt-1">
+            <small class="opacity-75" style="font-size:.65rem;"><i class="bi bi-envelope me-1"></i>Processed daily</small>
+            <i class="bi bi-envelope-paper opacity-50" style="font-size:1.2rem;"></i>
+          </div>
+        </div>
+      </div>
     </div>
-    <div class="card-body">
-      <form class="row g-3" method="POST" action="/servers">
-        <div class="col-md-4">
-          <div class="form-floating">
-            <input type="text" name="name" class="form-control" id="serverName" placeholder="Server Name" required>
-            <label for="serverName">
-              <i class="bi bi-tag me-1"></i> Server Name
-            </label>
+    <div class="col-md-2 col-sm-4 col-6 d-flex">
+      <div class="card text-white border-0 shadow metric-card w-100" style="background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);">
+        <div class="card-body p-2 d-flex flex-column justify-content-between">
+          <div>
+            <h6 class="card-title mb-0 opacity-90" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.04em;">Domains</h6>
+            <div class="fw-bold" style="font-size:1.4rem;line-height:1.2;">300+</div>
+          </div>
+          <div class="d-flex justify-content-between align-items-end mt-1">
+            <small class="opacity-75" style="font-size:.65rem;"><i class="bi bi-globe me-1"></i>Customers</small>
+            <i class="bi bi-globe2 opacity-50" style="font-size:1.2rem;"></i>
           </div>
         </div>
-        <div class="col-md-4">
-          <div class="form-floating">
-            <input type="text" name="ip_address" class="form-control" id="serverIp" placeholder="IP Address" required>
-            <label for="serverIp">
-              <i class="bi bi-ethernet me-1"></i> IP Address
-            </label>
-          </div>
-        </div>
-        <div class="col-md-4">
-          <div class="form-floating">
-            <select class="form-select" id="serverType">
-              <option selected>Production</option>
-              <option>Development</option>
-              <option>Testing</option>
-            </select>
-            <label for="serverType">
-              <i class="bi bi-gear me-1"></i> Server Type
-            </label>
-          </div>
-        </div>
-        <div class="col-md-12">
-          <button type="submit" class="btn btn-gradient text-white px-4 py-2" style="background: var(--success-gradient);">
-            <i class="bi bi-plus-lg me-2"></i> Add Server
-          </button>
-        </div>
-      </form>
+      </div>
     </div>
   </div>
 
@@ -217,7 +168,7 @@
             {% for server_with_stats in servers %}
             {% set server = server_with_stats.server %}
             {% set stats = server_with_stats.latest_stats %}
-            <tr class="server-row">
+            <tr class="server-row" id="server-row-{{ server.id }}">
               <td>
                 <div class="d-flex align-items-center">
                   <div class="status-indicator {% if stats %}online{% else %}offline{% endif %} me-2"></div>
@@ -328,12 +279,14 @@
                   <a href="/history/{{ server.id }}?period=24h" class="btn btn-outline-primary" title="View History">
                     <i class="bi bi-clock-history"></i>
                   </a>
+                  {% if user_role == "admin" %}
                   <a href="/servers/{{ server.id }}/edit" class="btn btn-outline-success" title="Edit Server">
                     <i class="bi bi-pencil"></i>
                   </a>
                   <button class="btn btn-outline-danger" onclick="confirmDeleteServer('{{ server.id }}', '{{ server.name }}')" title="Delete Server">
                     <i class="bi bi-trash"></i>
                   </button>
+                  {% endif %}
                 </div>
               </td>
             </tr>
@@ -353,14 +306,57 @@
       </div>
     </div>
   </div>
+
+  <!-- Add New Server Form (bottom) -->
+  {% if user_role == "admin" %}
+  <div class="card mt-4 border-0 shadow-lg">
+    <div class="card-header text-white" style="background: var(--primary-gradient);">
+      <h5 class="mb-0">
+        <i class="bi bi-plus-circle me-2"></i>
+        Add New Server
+      </h5>
+    </div>
+    <div class="card-body">
+      <form class="row g-3" method="POST" action="/servers">
+        <div class="col-md-4">
+          <div class="form-floating">
+            <input type="text" name="name" class="form-control" id="serverName" placeholder="Server Name" required>
+            <label for="serverName"><i class="bi bi-tag me-1"></i> Server Name</label>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="form-floating">
+            <input type="text" name="ip_address" class="form-control" id="serverIp" placeholder="IP Address" required>
+            <label for="serverIp"><i class="bi bi-ethernet me-1"></i> IP Address</label>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="form-floating">
+            <select class="form-select" id="serverType" name="server_type">
+              <option selected>Production</option>
+              <option>Development</option>
+              <option>Testing</option>
+            </select>
+            <label for="serverType"><i class="bi bi-gear me-1"></i> Server Type</label>
+          </div>
+        </div>
+        <div class="col-12">
+          <button type="submit" class="btn text-white px-4 py-2" style="background: var(--success-gradient);">
+            <i class="bi bi-plus-lg me-2"></i> Add Server
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+  {% endif %}
 </div>
 
 <style>
-/* Enhanced metric cards styling */
 .metric-card {
   transition: all 0.3s ease;
   position: relative;
   overflow: hidden;
+  height: 100%;
 }
 
 .metric-card::before {
@@ -374,8 +370,8 @@
 }
 
 .metric-card:hover {
-  transform: translateY(-5px);
-  box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
+  transform: translateY(-3px);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
 }
 
 .metric-card .display-6 {
@@ -726,16 +722,17 @@ function confirmDeleteServer(serverId, serverName) {
                 'Content-Type': 'application/json',
             }
         })
-        .then(response => {
+        .then(function(response) {
             if (response.ok) {
-                window.location.reload();
+                showToast('Server "' + serverName + '" has been deleted.', 'success');
+                setTimeout(function() { window.location.reload(); }, 2000);
             } else {
-                alert('Failed to delete server');
+                showToast('Failed to delete server. Please try again.', 'danger');
             }
         })
-        .catch(error => {
+        .catch(function(error) {
             console.error('Error:', error);
-            alert('Error deleting server');
+            showToast('Error deleting server. Please try again.', 'danger');
         });
     }
 }
@@ -770,8 +767,9 @@ function displayAlerts(alerts) {
         const alertClass = getAlertClass(alert.alert.alert_type);
         const icon = getAlertIcon(alert.alert.alert_type);
         const timeAgo = formatTimeAgo(new Date(alert.alert.created_at));
+        const serverId = alert.server.id;
         
-        return '<div class="alert ' + alertClass + ' alert-dismissible fade show mb-2" role="alert">' +
+        return '<div class="alert ' + alertClass + ' alert-dismissible fade show mb-2" role="alert" style="cursor:pointer;" onclick="scrollToServer(\'' + serverId + '\')">' +
             '<div class="d-flex align-items-start">' +
                 '<div class="me-3">' +
                     '<i class="bi ' + icon + ' fs-5"></i>' +
@@ -780,12 +778,13 @@ function displayAlerts(alerts) {
                     '<div class="fw-bold">' + alert.alert.message + '</div>' +
                     '<div class="small text-muted">' +
                         'Server: ' + alert.server.name + ' (' + alert.server.ip_address + ') • ' + timeAgo +
+                        ' <span class="ms-1 text-primary"><i class="bi bi-arrow-right-circle"></i> Click to view</span>' +
                     '</div>' +
                     (alert.alert.current_value && alert.alert.threshold_value ? 
                         '<div class="small mt-1">Current: ' + alert.alert.current_value + (alert.alert.metric_type === 'cpu' || alert.alert.metric_type === 'memory' || alert.alert.metric_type === 'disk' ? '%' : '') + ' / Threshold: ' + alert.alert.threshold_value + (alert.alert.metric_type === 'cpu' || alert.alert.metric_type === 'memory' || alert.alert.metric_type === 'disk' ? '%' : '') + '</div>' 
                         : '') +
                 '</div>' +
-                '<button type="button" class="btn-close btn-close-sm" onclick="resolveAlert(\'' + alert.alert.id + '\')"></button>' +
+                '<button type="button" class="btn-close btn-close-sm" onclick="event.stopPropagation(); resolveAlert(\'' + alert.alert.id + '\')"></button>' +
             '</div>' +
         '</div>';
     }).join('');
@@ -844,19 +843,36 @@ function refreshAlerts() {
     loadAlerts();
 }
 
+function scrollToServer(serverId) {
+    const row = document.getElementById('server-row-' + serverId);
+    if (!row) return;
+    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    row.style.transition = 'background-color 0.3s ease';
+    row.style.backgroundColor = 'rgba(255, 193, 7, 0.35)';
+    setTimeout(function() { row.style.backgroundColor = ''; }, 2500);
+}
+
 function updateSystemStatus(alerts) {
-    const statusElement = document.querySelector('.badge');
-    const criticalAlerts = alerts.filter(alert => alert.alert.alert_type === 'critical' || alert.alert.alert_type === 'down');
-    
+    const statusBadge = document.getElementById('system-status-badge');
+    const countBadge  = document.getElementById('alert-count-badge');
+    const criticalAlerts = alerts.filter(a => a.alert.alert_type === 'critical' || a.alert.alert_type === 'down');
+
     if (criticalAlerts.length > 0) {
-        statusElement.className = 'badge bg-danger';
-        statusElement.innerHTML = '<i class="bi bi-activity me-1"></i> ' + criticalAlerts.length + ' Critical Issue' + (criticalAlerts.length > 1 ? 's' : '');
+        statusBadge.className = 'badge bg-danger fs-6';
+        statusBadge.innerHTML = '<i class="bi bi-exclamation-octagon me-1"></i> ' + criticalAlerts.length + ' Critical Issue' + (criticalAlerts.length > 1 ? 's' : '');
     } else if (alerts.length > 0) {
-        statusElement.className = 'badge bg-warning';
-        statusElement.innerHTML = '<i class="bi bi-activity me-1"></i> ' + alerts.length + ' Warning' + (alerts.length > 1 ? 's' : '');
+        statusBadge.className = 'badge bg-warning text-dark fs-6';
+        statusBadge.innerHTML = '<i class="bi bi-activity me-1"></i> ' + alerts.length + ' Warning' + (alerts.length > 1 ? 's' : '');
     } else {
-        statusElement.className = 'badge bg-success';
-        statusElement.innerHTML = '<i class="bi bi-activity me-1"></i> All Systems Operational';
+        statusBadge.className = 'badge bg-success fs-6';
+        statusBadge.innerHTML = '<i class="bi bi-activity me-1"></i> All Systems Operational';
+    }
+
+    if (alerts.length > 0) {
+        countBadge.style.display = '';
+        countBadge.innerHTML = '<i class="bi bi-exclamation-triangle-fill me-1"></i> ' + alerts.length + ' Warning' + (alerts.length > 1 ? 's' : '');
+    } else {
+        countBadge.style.display = 'none';
     }
 }
 

@@ -3,6 +3,21 @@ use sqlx::FromRow;
 use chrono::NaiveDateTime;
 
 #[derive(Debug, Serialize, Deserialize, FromRow, Clone)]
+pub struct User {
+    pub id: String,
+    pub username: String,
+    pub password_hash: String,
+    pub role: String, // "admin" or "user"
+    pub created_at: NaiveDateTime,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UserWithServers {
+    pub user: User,
+    pub servers: Vec<Server>,
+}
+
+#[derive(Debug, Serialize, Deserialize, FromRow, Clone)]
 pub struct Server {
     pub id: String,
     pub name: String,

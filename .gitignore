@@ -1,7 +1,6 @@
 # Rust
 /target/
 **/*.rs.bk
-Cargo.lock
 
 # Database
 *.db
@@ -28,3 +27,11 @@ data/
 # Temporary files
 *.tmp
 *.temp
+
+# Production specific
+backups/
+*.pid
+.DS_Store
+
+# SQLx
+.sqlx/

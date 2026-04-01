@@ -2,7 +2,7 @@
 {% block content %}
 <div class="container" style="max-width: 600px;">
   <div class="d-flex align-items-center justify-content-between mb-4">
-    <h2><i class="bi bi-person-plus me-2"></i>Add User</h2>
+    <h2><i class="bi bi-person-gear me-2"></i>Edit User: {{ user.username }}</h2>
     <a href="/users" class="btn btn-outline-secondary btn-sm">
       <i class="bi bi-arrow-left me-1"></i> Back to Users
     </a>
@@ -10,31 +10,32 @@
 
   <div class="card">
     <div class="card-body p-4">
-      <form method="POST" action="/users/add" id="addUserForm">
+      <form method="POST" action="/users/{{ user.id }}/edit" id="editUserForm">
         <div class="mb-3">
           <label class="form-label">Username</label>
-          <input type="text" name="username" class="form-control" required autocomplete="off">
+          <input type="text" class="form-control" value="{{ user.username }}" disabled>
         </div>
         <div class="mb-3">
-          <label class="form-label">Password</label>
-          <input type="password" name="password" class="form-control" required autocomplete="new-password">
+          <label class="form-label">New Password <span class="text-muted small">(leave blank to keep current)</span></label>
+          <input type="password" name="password" class="form-control" autocomplete="new-password">
         </div>
         <div class="mb-3">
           <label class="form-label">Role</label>
           <select name="role" class="form-select">
-            <option value="user">User (sees assigned servers only)</option>
-            <option value="admin">Admin (sees all servers)</option>
+            <option value="user" {% if user.role == "user" %}selected{% endif %}>User (sees assigned servers only)</option>
+            <option value="admin" {% if user.role == "admin" %}selected{% endif %}>Admin (sees all servers)</option>
           </select>
         </div>
 
         <div class="mb-4">
-          <label class="form-label">Assign Servers</label>
+          <label class="form-label">Assigned Servers</label>
           {% if all_servers %}
             <div class="border rounded p-3" style="max-height: 260px; overflow-y: auto;">
               {% for server in all_servers %}
               <div class="form-check mb-1">
                 <input class="form-check-input server-checkbox" type="checkbox"
-                       value="{{ server.id }}" id="srv_{{ server.id }}">
+                       value="{{ server.id }}" id="srv_{{ server.id }}"
+                       {% if server.id in assigned_ids %}checked{% endif %}>
                 <label class="form-check-label" for="srv_{{ server.id }}">
                   {{ server.name }}
                   <span class="text-muted small">({{ server.ip_address }})</span>
@@ -43,14 +44,13 @@
               {% endfor %}
             </div>
           {% else %}
-            <p class="text-muted small">No servers yet. You can assign them later by editing this user.</p>
+            <p class="text-muted small">No servers available.</p>
           {% endif %}
-          <!-- Hidden field collects selected server IDs as CSV -->
           <input type="hidden" name="server_ids" id="serverIdsInput">
         </div>
 
-        <button type="submit" class="btn btn-success w-100">
-          <i class="bi bi-person-check me-1"></i> Create User
+        <button type="submit" class="btn btn-primary w-100">
+          <i class="bi bi-save me-1"></i> Save Changes
         </button>
       </form>
     </div>
@@ -58,7 +58,7 @@
 </div>
 
 <script>
-  document.getElementById('addUserForm').addEventListener('submit', function() {
+  document.getElementById('editUserForm').addEventListener('submit', function() {
     const checked = Array.from(document.querySelectorAll('.server-checkbox:checked'))
       .map(cb => cb.value);
     document.getElementById('serverIdsInput').value = checked.join(',');

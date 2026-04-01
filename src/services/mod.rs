@@ -11,7 +11,6 @@ use uuid::Uuid;
 use crate::models::{ServerStats, NetdataResponse, Alert, AlertPreference};
 
 const MIN_DISK_USAGE_PERCENT: f64 = 0.0;
-const DEFAULT_DISK_USAGE_PERCENT: f64 = 0.0;
 
 #[derive(Error, Debug)]
 pub enum MetricsError {
@@ -678,7 +677,7 @@ impl MetricsService {
             AlertPreference,
             r#"SELECT id as "id!", user_id as "user_id!", cpu_threshold as "cpu_threshold!", 
                memory_threshold as "memory_threshold!", disk_threshold as "disk_threshold!",
-               load_threshold as "load_threshold!", enable_notifications as "enable_notifications!",
+               load_threshold as "load_threshold!", CAST(enable_notifications AS INTEGER) as "enable_notifications!: bool",
                created_at as "created_at!", updated_at as "updated_at!"
                FROM alert_preferences WHERE user_id = ?"#,
             user_id
@@ -734,7 +733,7 @@ impl MetricsService {
                 Alert,
                 r#"SELECT id as "id!", server_id as "server_id!", alert_type as "alert_type!", 
                    metric_type as "metric_type!", message as "message!", current_value, threshold_value,
-                   is_resolved as "is_resolved!", created_at as "created_at!", resolved_at
+                   CAST(is_resolved AS INTEGER) as "is_resolved!: bool", created_at as "created_at!", resolved_at
                    FROM alerts WHERE server_id = ? AND is_resolved = FALSE ORDER BY created_at DESC"#,
                 sid
             )
@@ -745,7 +744,7 @@ impl MetricsService {
                 Alert,
                 r#"SELECT id as "id!", server_id as "server_id!", alert_type as "alert_type!", 
                    metric_type as "metric_type!", message as "message!", current_value, threshold_value,
-                   is_resolved as "is_resolved!", created_at as "created_at!", resolved_at
+                   CAST(is_resolved AS INTEGER) as "is_resolved!: bool", created_at as "created_at!", resolved_at
                    FROM alerts WHERE is_resolved = FALSE ORDER BY created_at DESC"#
             )
             .fetch_all(&self.pool)
@@ -910,28 +909,6 @@ pub fn parse_disk(chart: &NetdataResponse) -> f64 {
         if total > 0.0 && free > 0.0 {
             let used_calculated = total - free;
             return compute_percent(used_calculated, total);
-        }
-    }
-    0.0
-}
-
-/// Parse network or disk I/O rate (bytes per second)
-pub fn parse_rate(chart: &NetdataResponse) -> f64 {
-    if chart.data.len() >= 2 {
-        let last = &chart.data[chart.data.len() - 1];
-        let prev = &chart.data[chart.data.len() - 2];
-
-        if let (Some(t_last), Some(t_prev)) = (last.get(0).and_then(json_to_f64), prev.get(0).and_then(json_to_f64)) {
-            let dt: f64 = (t_last - t_prev).abs();
-            let mut sum_delta = 0.0;
-
-            for i in 1..chart.labels.len() {
-                if let (Some(a), Some(b)) = (prev.get(i).and_then(json_to_f64), last.get(i).and_then(json_to_f64)) {
-                    sum_delta += (b - a).max(0.0_f64);
-                }
-            }
-
-            return compute_rate(sum_delta, dt);
         }
     }
     0.0
