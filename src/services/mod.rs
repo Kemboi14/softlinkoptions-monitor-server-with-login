@@ -62,8 +62,13 @@ impl MetricsService {
 
         // Helpers to query Netdata JSON endpoints
         async fn get_chart(client: &Client, url: &str, chart: &str) -> Result<NetdataResponse, MetricsError> {
-            // Use after=-10 for recent data; points=5 for rate calculation
-            let full = format!("{}/api/v1/data?chart={}&points=5&after=-10&options=unaligned", url, chart);
+            get_chart_window(client, url, chart, 10).await
+        }
+
+        // Like get_chart but with a configurable time window (seconds back from now).
+        // Use a larger window for slow-updating charts (e.g. disk space every 60s).
+        async fn get_chart_window(client: &Client, url: &str, chart: &str, after_secs: u32) -> Result<NetdataResponse, MetricsError> {
+            let full = format!("{}/api/v1/data?chart={}&points=5&after=-{}&options=unaligned", url, chart, after_secs);
             let resp = client.get(&full).send().await?.error_for_status()?;
             let json = resp.json::<serde_json::Value>().await?;
             let labels = json.get("result").and_then(|r| r.get("labels")).or_else(|| json.get("labels")).and_then(|v| v.as_array());
@@ -242,9 +247,10 @@ impl MetricsService {
         ];
         let mut disk_usage_percent: f64 = 0.0;
         let mut disk_found = false;
+        // Disk space updates every ~60s in Netdata, so use a 300s window to guarantee data
         for c in disk_candidates {
             if should_try_chart(c) {
-                if let Ok(chart) = get_chart(&self.client, &base, c).await {
+                if let Ok(chart) = get_chart_window(&self.client, &base, c, 300).await {
                     let pct = parse_disk(&chart);
                     if pct > 0.0 && pct <= 100.0 {
                         disk_usage_percent = pct;
