@@ -24,11 +24,10 @@ async fn main() -> std::io::Result<()> {
         .await
         .expect("Failed to connect to database");
 
-    // Skip migrations for now (database already set up)
-    // sqlx::migrate!("./migrations")
-    //     .run(&pool)
-    //     .await
-    //     .expect("Failed to run migrations");
+    sqlx::migrate!("./migrations")
+        .run(&pool)
+        .await
+        .expect("Failed to run migrations");
 
     // Read server config from environment
     let port: u16 = env::var("SERVER_PORT")
