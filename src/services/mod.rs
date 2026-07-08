@@ -691,18 +691,31 @@ impl MetricsService {
         )
         .execute(&self.pool)
         .await?;
-        
+
         // Check if we actually inserted a new alert
         let rows_affected = sqlx::query_scalar!(
             "SELECT changes() as count"
         )
         .fetch_one(&self.pool)
         .await?;
-        
+
         if rows_affected.unwrap_or(0) > 0 {
             warn!("🚨 Alert created: {} - {} (Server: {})", alert_type, message, server_id);
         }
-        
+
+        // Always refresh current_value and message on the existing open alert so the
+        // dashboard always shows the latest reading, not the value from when it was raised.
+        sqlx::query!(
+            "UPDATE alerts SET current_value = ?, message = ?
+             WHERE server_id = ? AND metric_type = ? AND is_resolved = FALSE",
+            current_value,
+            message,
+            server_id,
+            metric_type
+        )
+        .execute(&self.pool)
+        .await?;
+
         Ok(())
     }
     

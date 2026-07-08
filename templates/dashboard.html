@@ -766,9 +766,9 @@ function displayAlerts(alerts) {
     const alertsHtml = alerts.map(alert => {
         const alertClass = getAlertClass(alert.alert.alert_type);
         const icon = getAlertIcon(alert.alert.alert_type);
-        const timeAgo = formatTimeAgo(new Date(alert.alert.created_at));
+        const activeDuration = formatActiveDuration(new Date(alert.alert.created_at));
         const serverId = alert.server.id;
-        
+
         return '<div class="alert ' + alertClass + ' alert-dismissible fade show mb-2" role="alert" style="cursor:pointer;" onclick="scrollToServer(\'' + serverId + '\')">' +
             '<div class="d-flex align-items-start">' +
                 '<div class="me-3">' +
@@ -777,7 +777,7 @@ function displayAlerts(alerts) {
                 '<div class="flex-grow-1">' +
                     '<div class="fw-bold">' + alert.alert.message + '</div>' +
                     '<div class="small text-muted">' +
-                        'Server: ' + alert.server.name + ' (' + alert.server.ip_address + ') • ' + timeAgo +
+                        'Server: ' + alert.server.name + ' (' + alert.server.ip_address + ') • ' + activeDuration +
                         ' <span class="ms-1 text-primary"><i class="bi bi-arrow-right-circle"></i> Click to view</span>' +
                     '</div>' +
                     (alert.alert.current_value && alert.alert.threshold_value ? 
@@ -813,11 +813,29 @@ function getAlertIcon(alertType) {
 function formatTimeAgo(date) {
     const now = new Date();
     const diffInSeconds = Math.floor((now - date) / 1000);
-    
+
     if (diffInSeconds < 60) return 'just now';
     if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)} minutes ago`;
     if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)} hours ago`;
     return `${Math.floor(diffInSeconds / 86400)} days ago`;
+}
+
+function formatActiveDuration(date) {
+    const now = new Date();
+    const diffInSeconds = Math.floor((now - date) / 1000);
+
+    if (diffInSeconds < 60) return '<span class="badge bg-danger ms-1">just started</span>';
+    if (diffInSeconds < 3600) {
+        const m = Math.floor(diffInSeconds / 60);
+        return '<span class="badge bg-warning text-dark ms-1">active for ' + m + 'm</span>';
+    }
+    if (diffInSeconds < 86400) {
+        const h = Math.floor(diffInSeconds / 3600);
+        const m = Math.floor((diffInSeconds % 3600) / 60);
+        return '<span class="badge bg-danger ms-1">active for ' + h + 'h ' + m + 'm</span>';
+    }
+    const d = Math.floor(diffInSeconds / 86400);
+    return '<span class="badge bg-danger ms-1">active for ' + d + 'd</span>';
 }
 
 async function resolveAlert(alertId) {
