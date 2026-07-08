@@ -612,21 +612,32 @@ impl MetricsService {
         Ok(())
     }
     
-    /// Check if server is down (no recent metrics)
+    /// Called on successful metric fetch — server is definitely up right now.
+    /// Always resolve any existing server_down alerts; never create one here.
     async fn check_server_down_alert(&self, server_id: &str) -> Result<(), MetricsError> {
+        self.resolve_alerts_by_type(server_id, "server_down").await
+    }
+
+    /// Called when metric fetch FAILS for a server.
+    /// If no stats have arrived in the last 5 minutes, the outage is sustained:
+    /// resolve all stale metric alerts and create a single server_down alert.
+    pub async fn handle_collection_failure(&self, server_id: &str) -> Result<(), MetricsError> {
         let five_minutes_ago = Utc::now().naive_utc() - chrono::Duration::minutes(5);
-        
-        let recent_count = sqlx::query_scalar!(
-            "SELECT COUNT(*) as count FROM server_stats WHERE server_id = ? AND created_at > ?",
+
+        let recent_count: i64 = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM server_stats WHERE server_id = ? AND created_at > ?",
             server_id,
             five_minutes_ago
         )
         .fetch_one(&self.pool)
-        .await?;
-        
-        let count: i64 = recent_count as i64;
-        
-        if count == 0 {
+        .await? as i64;
+
+        if recent_count == 0 {
+            // Resolve stale metric alerts — they belong to a time when the server was
+            // running. Now it's down; show only the server_down alert.
+            for metric in &["cpu", "memory", "disk", "load"] {
+                self.resolve_alerts_by_type(server_id, metric).await?;
+            }
             self.create_alert_if_not_exists(
                 server_id,
                 "critical",
@@ -635,11 +646,8 @@ impl MetricsService {
                 None,
                 None,
             ).await?;
-        } else {
-            // Resolve any existing server down alerts
-            self.resolve_alerts_by_type(server_id, "server_down").await?;
         }
-        
+
         Ok(())
     }
     
@@ -801,6 +809,50 @@ impl MetricsService {
         Ok(alerts)
     }
     
+    /// Get paginated alert history (all alerts, resolved + unresolved) with server names.
+    pub async fn get_alert_history(
+        &self,
+        page: i64,
+        limit: i64,
+    ) -> Result<(Vec<crate::models::AlertWithServer>, i64), MetricsError> {
+        let offset = (page - 1) * limit;
+
+        let total: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM alerts")
+            .fetch_one(&self.pool)
+            .await? as i64;
+
+        let alerts = sqlx::query_as!(
+            crate::models::Alert,
+            r#"SELECT id as "id!", server_id as "server_id!", alert_type as "alert_type!",
+               metric_type as "metric_type!", message as "message!", current_value, threshold_value,
+               CAST(is_resolved AS INTEGER) as "is_resolved!: bool", created_at as "created_at!", resolved_at
+               FROM alerts
+               ORDER BY created_at DESC
+               LIMIT ? OFFSET ?"#,
+            limit,
+            offset
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut result = Vec::new();
+        for alert in alerts {
+            if let Some(server) = sqlx::query_as!(
+                crate::models::Server,
+                r#"SELECT id as "id!", name as "name!", ip_address as "ip_address!", created_at as "created_at!"
+                   FROM servers WHERE id = ?"#,
+                alert.server_id
+            )
+            .fetch_optional(&self.pool)
+            .await?
+            {
+                result.push(crate::models::AlertWithServer { alert, server });
+            }
+        }
+
+        Ok((result, total))
+    }
+
     /// Get alert summary
     pub async fn get_alert_summary(&self) -> Result<crate::models::AlertSummary, MetricsError> {
         let summary = sqlx::query_as!(

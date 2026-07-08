@@ -1513,3 +1513,80 @@ pub async fn delete_user(
     }
 }
 
+// =========================
+// ALERT HISTORY
+// =========================
+
+#[derive(Deserialize)]
+struct HistoryQuery {
+    page: Option<i64>,
+}
+
+#[get("/alerts/history")]
+pub async fn alert_history_page(
+    pool: web::Data<SqlitePool>,
+    tera: web::Data<Tera>,
+    query: Query<HistoryQuery>,
+    req: actix_web::HttpRequest,
+) -> impl Responder {
+    let (_, user_role) = match check_auth(&req) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+
+    let page = query.page.unwrap_or(1).max(1);
+    let limit = 25_i64;
+    let metrics_service = MetricsService::new(pool.as_ref().clone());
+
+    match metrics_service.get_alert_history(page, limit).await {
+        Ok((alerts, total)) => {
+            let total_pages = (total + limit - 1) / limit;
+            let pages: Vec<i64> = (1..=total_pages).collect();
+            let mut ctx = Context::new();
+            ctx.insert("user_role", &user_role);
+            ctx.insert("alerts", &alerts);
+            ctx.insert("current_page", &page);
+            ctx.insert("total_pages", &total_pages);
+            ctx.insert("pages", &pages);
+            ctx.insert("total", &total);
+            match tera.render("alert_history.html", &ctx) {
+                Ok(body) => HttpResponse::Ok().content_type("text/html").body(body),
+                Err(e) => {
+                    error!("Template error: {}", e);
+                    HttpResponse::InternalServerError().body("Template error")
+                }
+            }
+        }
+        Err(e) => {
+            error!("Failed to fetch alert history: {}", e);
+            HttpResponse::InternalServerError().body("Failed to fetch alert history")
+        }
+    }
+}
+
+#[get("/api/alerts/history")]
+pub async fn api_alert_history(
+    pool: web::Data<SqlitePool>,
+    query: Query<HistoryQuery>,
+    req: actix_web::HttpRequest,
+) -> impl Responder {
+    if let Err(response) = check_api_auth(&req) {
+        return response;
+    }
+    let page = query.page.unwrap_or(1).max(1);
+    let limit = 25_i64;
+    let metrics_service = MetricsService::new(pool.as_ref().clone());
+    match metrics_service.get_alert_history(page, limit).await {
+        Ok((alerts, total)) => HttpResponse::Ok().json(serde_json::json!({
+            "alerts": alerts,
+            "total": total,
+            "page": page,
+            "total_pages": (total + limit - 1) / limit,
+        })),
+        Err(e) => {
+            error!("Failed to fetch alert history: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({"error": "Failed to fetch alert history"}))
+        }
+    }
+}
+

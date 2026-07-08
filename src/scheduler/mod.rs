@@ -67,6 +67,9 @@ async fn collect_all_metrics(metrics_service: &MetricsService, pool: &SqlitePool
                                     "Failed to collect metrics for {}: {}",
                                     server_clone.name, e
                                 );
+                                if let Err(ae) = service.handle_collection_failure(&server_clone.id).await {
+                                    error!("Failed to create server-down alert for {}: {}", server_clone.name, ae);
+                                }
                                 Err(e)
                             }
                         }

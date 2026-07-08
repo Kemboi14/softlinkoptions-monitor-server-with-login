@@ -84,6 +84,8 @@ async fn main() -> std::io::Result<()> {
             .service(routes::edit_user_page)
             .service(routes::edit_user)
             .service(routes::delete_user)
+            .service(routes::alert_history_page)
+            .service(routes::api_alert_history)
             .wrap(Logger::default())
     })
     .bind(("0.0.0.0", port))?
