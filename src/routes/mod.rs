@@ -849,13 +849,13 @@ async fn get_servers_with_latest_stats_paginated(
     for server in servers {
         let latest_stats = sqlx::query_as!(
             ServerStats,
-            r#"SELECT id as "id!", server_id as "server_id!", cpu_usage as "cpu_usage!", 
+            r#"SELECT id as "id!", server_id as "server_id!", cpu_usage as "cpu_usage!",
                  memory_usage as "memory_usage!", memory_total as "memory_total!",
-                 disk_usage as "disk_usage!", load_avg as "load_avg!", 
-                 logged_users as "logged_users!", network_in as "network_in!", 
+                 disk_usage as "disk_usage!", load_avg as "load_avg!",
+                 logged_users as "logged_users!", network_in as "network_in!",
                  network_out as "network_out!", network_in_rate as "network_in_rate!", network_out_rate as "network_out_rate!",
-                 disk_read_rate as "disk_read_rate!", disk_write_rate as "disk_write_rate!", uptime as "uptime!", 
-                 created_at as "created_at!"
+                 disk_read_rate as "disk_read_rate!", disk_write_rate as "disk_write_rate!", uptime as "uptime!",
+                 COALESCE(cpu_cores, 0) as "cpu_cores!", created_at as "created_at!"
                FROM server_stats WHERE server_id = ? ORDER BY created_at DESC LIMIT 1"#,
             server.id
         ).fetch_optional(pool).await?;
@@ -892,13 +892,13 @@ async fn get_server_history_paginated(
     let stats = sqlx::query_as!(
         ServerStats,
         r#"
-        SELECT id as "id!", server_id as "server_id!", cpu_usage as "cpu_usage!", 
+        SELECT id as "id!", server_id as "server_id!", cpu_usage as "cpu_usage!",
                memory_usage as "memory_usage!", memory_total as "memory_total!",
-               disk_usage as "disk_usage!", load_avg as "load_avg!", 
-               logged_users as "logged_users!", network_in as "network_in!", 
+               disk_usage as "disk_usage!", load_avg as "load_avg!",
+               logged_users as "logged_users!", network_in as "network_in!",
                network_out as "network_out!", network_in_rate as "network_in_rate!", network_out_rate as "network_out_rate!",
-               disk_read_rate as "disk_read_rate!", disk_write_rate as "disk_write_rate!", uptime as "uptime!", 
-               created_at as "created_at!"
+               disk_read_rate as "disk_read_rate!", disk_write_rate as "disk_write_rate!", uptime as "uptime!",
+               COALESCE(cpu_cores, 0) as "cpu_cores!", created_at as "created_at!"
         FROM server_stats
         WHERE server_id = ? AND created_at >= ?
         ORDER BY created_at ASC

@@ -44,6 +44,7 @@ pub struct ServerStats {
     pub disk_read_rate: f64,
     pub disk_write_rate: f64,
     pub uptime: i64,
+    pub cpu_cores: i64,
     pub created_at: NaiveDateTime,
 }
 

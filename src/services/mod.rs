@@ -426,6 +426,14 @@ impl MetricsService {
             }
         }
 
+        // CPU core count — used to make load-average alerts relative to capacity.
+        // Netdata reports this in /api/v1/info as "system_cpu_cores".
+        let cpu_cores: i64 = info_json
+            .as_ref()
+            .and_then(|info| info.get("system_cpu_cores").and_then(json_to_f64))
+            .map(|v| v as i64)
+            .unwrap_or(0);
+
         let cpu_final = cpu_usage.unwrap_or(0.0).clamp(0.0, 100.0);
         let mem_final = memory_usage.clamp(0.0, 100.0);
         let disk_final = disk_usage_percent.clamp(0.0, 100.0);
@@ -461,13 +469,14 @@ impl MetricsService {
             disk_usage: disk_final,
             load_avg: load_final,
             logged_users: users_final,
-            network_in: net_in_rate, // Use actual network values instead of hardcoded zeros
+            network_in: net_in_rate,
             network_out: net_out_rate,
             network_in_rate: net_in_rate,
             network_out_rate: net_out_rate,
             disk_read_rate: disk_read_rate,
             disk_write_rate: disk_write_rate,
             uptime: uptime_final,
+            cpu_cores,
             created_at: Utc::now().naive_utc(),
         })
     }
@@ -482,8 +491,8 @@ impl MetricsService {
                 id, server_id, cpu_usage, memory_usage, memory_total,
                 disk_usage, load_avg, logged_users,
                 network_in, network_out, network_in_rate, network_out_rate,
-                disk_read_rate, disk_write_rate, uptime, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                disk_read_rate, disk_write_rate, uptime, cpu_cores, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
             stats.id,
             stats.server_id,
@@ -500,6 +509,7 @@ impl MetricsService {
             stats.disk_read_rate,
             stats.disk_write_rate,
             stats.uptime,
+            stats.cpu_cores,
             stats.created_at
         )
         .execute(&self.pool)
@@ -508,15 +518,21 @@ impl MetricsService {
         Ok(())
     }
 
-    /// Check metrics against thresholds and create alerts if necessary
+    /// Check metrics against thresholds and create or auto-resolve alerts.
+    ///
+    /// Every metric check has two branches:
+    ///   - above threshold → create alert (idempotent, won't duplicate)
+    ///   - below threshold → resolve any existing open alert of that type
+    ///
+    /// This ensures alerts clear automatically when the problem goes away,
+    /// so the "Active Alerts" panel only shows genuinely current issues.
     pub async fn check_and_create_alerts(&self, stats: &ServerStats, server_id: &str) -> Result<(), MetricsError> {
-        // Get default alert preferences (for now, we'll use defaults)
         let preferences = self.get_default_alert_preferences().await?;
-        
+
         // Check server down condition (no recent metrics)
         self.check_server_down_alert(server_id).await?;
-        
-        // Check CPU usage
+
+        // ── CPU ──────────────────────────────────────────────────────────────
         if stats.cpu_usage > preferences.cpu_threshold {
             let alert_type = if stats.cpu_usage > 95.0 { "critical" } else { "warning" };
             self.create_alert_if_not_exists(
@@ -527,9 +543,11 @@ impl MetricsService {
                 Some(stats.cpu_usage),
                 Some(preferences.cpu_threshold),
             ).await?;
+        } else {
+            self.resolve_alerts_by_type(server_id, "cpu").await?;
         }
-        
-        // Check memory usage
+
+        // ── Memory ───────────────────────────────────────────────────────────
         if stats.memory_usage > preferences.memory_threshold {
             let alert_type = if stats.memory_usage > 95.0 { "critical" } else { "warning" };
             self.create_alert_if_not_exists(
@@ -540,9 +558,11 @@ impl MetricsService {
                 Some(stats.memory_usage),
                 Some(preferences.memory_threshold),
             ).await?;
+        } else {
+            self.resolve_alerts_by_type(server_id, "memory").await?;
         }
-        
-        // Check disk usage
+
+        // ── Disk ─────────────────────────────────────────────────────────────
         if stats.disk_usage > preferences.disk_threshold {
             let alert_type = if stats.disk_usage > 98.0 { "critical" } else { "warning" };
             self.create_alert_if_not_exists(
@@ -553,21 +573,42 @@ impl MetricsService {
                 Some(stats.disk_usage),
                 Some(preferences.disk_threshold),
             ).await?;
+        } else {
+            self.resolve_alerts_by_type(server_id, "disk").await?;
         }
-        
-        // Check load average
-        if stats.load_avg > preferences.load_threshold {
-            let alert_type = if stats.load_avg > 20.0 { "critical" } else { "warning" };
+
+        // ── Load average (core-aware) ─────────────────────────────────────────
+        // Compare load against the number of CPU cores, not a fixed number.
+        // A load of 13 on a 16-core machine is fine; on a 2-core machine it is critical.
+        // Threshold: load/core ratio exceeds 1.0 (fully saturated) → warning;
+        //            load/core ratio exceeds 2.0 (2× overloaded) → critical.
+        // Fall back to the configured load_threshold only if core count is unknown.
+        let effective_load_threshold = if stats.cpu_cores > 0 {
+            stats.cpu_cores as f64  // 1.0× core count = 100% saturation
+        } else {
+            preferences.load_threshold
+        };
+        let critical_load_threshold = effective_load_threshold * 2.0;
+
+        if stats.load_avg > effective_load_threshold {
+            let alert_type = if stats.load_avg > critical_load_threshold { "critical" } else { "warning" };
+            let core_info = if stats.cpu_cores > 0 {
+                format!(" ({} cores)", stats.cpu_cores)
+            } else {
+                String::new()
+            };
             self.create_alert_if_not_exists(
                 server_id,
                 alert_type,
                 "load",
-                format!("Load average is {:.2}", stats.load_avg),
+                format!("Load average is {:.2}{}", stats.load_avg, core_info),
                 Some(stats.load_avg),
-                Some(preferences.load_threshold),
+                Some(effective_load_threshold),
             ).await?;
+        } else {
+            self.resolve_alerts_by_type(server_id, "load").await?;
         }
-        
+
         Ok(())
     }
     
