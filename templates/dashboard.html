@@ -820,22 +820,8 @@ function formatTimeAgo(date) {
     return `${Math.floor(diffInSeconds / 86400)} days ago`;
 }
 
-function formatActiveDuration(date) {
-    const now = new Date();
-    const diffInSeconds = Math.floor((now - date) / 1000);
-
-    if (diffInSeconds < 60) return '<span class="badge bg-danger ms-1">just started</span>';
-    if (diffInSeconds < 3600) {
-        const m = Math.floor(diffInSeconds / 60);
-        return '<span class="badge bg-warning text-dark ms-1">active for ' + m + 'm</span>';
-    }
-    if (diffInSeconds < 86400) {
-        const h = Math.floor(diffInSeconds / 3600);
-        const m = Math.floor((diffInSeconds % 3600) / 60);
-        return '<span class="badge bg-danger ms-1">active for ' + h + 'h ' + m + 'm</span>';
-    }
-    const d = Math.floor(diffInSeconds / 86400);
-    return '<span class="badge bg-danger ms-1">active for ' + d + 'd</span>';
+function formatActiveDuration(_date) {
+    return '<span class="badge bg-danger ms-1">Currently</span>';
 }
 
 async function resolveAlert(alertId) {
